@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
+import WalletConnectProvider from "@walletconnect/web3-provider";
 
 const CONTRACT_ADDRESS = "0x49ffdeF28EC2AFb9C0930a9Cc4aec6733F3b5d83";
 const CONTRACT_ABI = [
@@ -12,6 +13,8 @@ const CONTRACT_ABI = [
 
 // Sepolia chain ID constant
 const SEPOLIA_CHAIN_ID = 11155111;
+// Provide your Infura key for WalletConnect fallback
+const INFURA_API_KEY = process.env.REACT_APP_INFURA_API_KEY;
 
 export default function App() {
   const [provider, setProvider] = useState(null);
@@ -26,34 +29,38 @@ export default function App() {
 
   useEffect(() => {
     if (window.ethereum) {
-      // Initialize provider
       const prov = new ethers.BrowserProvider(window.ethereum);
       setProvider(prov);
-
-      // Fetch initial chainId
-      window.ethereum
-        .request({ method: 'eth_chainId' })
+      window.ethereum.request({ method: 'eth_chainId' })
         .then(id => setChainId(parseInt(id, 16)))
         .catch(() => setChainId(null));
-
-      // Listen for network changes
-      window.ethereum.on('chainChanged', hex => {
-        setChainId(parseInt(hex, 16));
-      });
-    } else {
-      setMessage({ text: "MetaMask not detected", type: "error" });
+      window.ethereum.on('chainChanged', hex => setChainId(parseInt(hex, 16)));
     }
   }, []);
 
   async function connectWallet() {
+    setLoading(true);
     try {
-      setLoading(true);
-      const accounts = await provider.send("eth_requestAccounts", []);
-      setAccount(accounts[0]);
-      setSigner(await provider.getSigner());
-      await fetchBalance(accounts[0]);
+      let _provider;
+      if (window.ethereum) {
+        await window.ethereum.request({ method: "eth_requestAccounts" });
+        _provider = new ethers.BrowserProvider(window.ethereum);
+      } else {
+        const wcProvider = new WalletConnectProvider({
+          rpc: { [SEPOLIA_CHAIN_ID]: `https://sepolia.infura.io/v3/${INFURA_API_KEY}` }
+        });
+        await wcProvider.enable();
+        _provider = new ethers.BrowserProvider(wcProvider);
+      }
+      setProvider(_provider);
+      const accounts = await _provider.send("eth_accounts", []);
+      const user = accounts[0];
+      setAccount(user);
+      setSigner(await _provider.getSigner());
+      await fetchBalance(user);
       setMessage({ text: "Wallet connected", type: "success" });
-    } catch {
+    } catch (err) {
+      console.error(err);
       setMessage({ text: "Connection failed", type: "error" });
     } finally {
       setLoading(false);
@@ -71,8 +78,8 @@ export default function App() {
   }
 
   async function handleMint() {
+    setLoading(true);
     try {
-      setLoading(true);
       setMessage({ text: "Processing mint...", type: "info" });
       const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
       const wei = ethers.parseUnits(mintAmount || "0", 18);
@@ -89,8 +96,8 @@ export default function App() {
   }
 
   async function handleBurn() {
+    setLoading(true);
     try {
-      setLoading(true);
       setMessage({ text: "Processing burn...", type: "info" });
       const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
       const wei = ethers.parseUnits(burnAmount || "0", 18);
@@ -108,22 +115,22 @@ export default function App() {
 
   return (
     <div className="p-4 max-w-md mx-auto">
-      {/* Network switch warning banner */}
+      {/* Network switch warning */}
       {chainId !== SEPOLIA_CHAIN_ID && (
-        <div className="w-full bg-yellow-200 text-yellow-800 p-3 text-center font-medium">
+        <div className="w-full bg-yellow-200 text-yellow-800 p-3 mb-4 text-center rounded">
           ⚠️ A dApp csak a Sepolia teszthálózaton működik.
           <button
             onClick={async () => {
               try {
                 await window.ethereum.request({
                   method: 'wallet_switchEthereumChain',
-                  params: [{ chainId: '0xaa36a7' }], // 11155111 in hex
+                  params: [{ chainId: '0xaa36a7' }],
                 });
               } catch (err) {
                 console.error('Hálózatváltási hiba:', err);
               }
             }}
-            className="ml-4 px-3 py-1 bg-yellow-800 text-white rounded"
+            className="ml-2 px-3 py-1 bg-yellow-800 text-white rounded"
           >
             Váltás Sepoliára
           </button>
@@ -133,15 +140,13 @@ export default function App() {
       <h1 className="text-2xl font-bold mb-4">Satoshi Standard dApp</h1>
 
       {message.text && (
-        <div
-          className={`mb-4 p-2 rounded ${
-            message.type === "success"
-              ? 'bg-green-100 text-green-800'
-              : message.type === "error"
-              ? 'bg-red-100 text-red-800'
-              : 'bg-blue-100 text-blue-800'
-          }`}
-        >
+        <div className={`mb-4 p-2 rounded ${
+          message.type === "success"
+            ? 'bg-green-100 text-green-800'
+            : message.type === "error"
+            ? 'bg-red-100 text-red-800'
+            : 'bg-blue-100 text-blue-800'
+        }`}>
           {message.text}
         </div>
       )}
@@ -158,7 +163,6 @@ export default function App() {
         <>
           <p className="mb-2">Connected: {account}</p>
           <p className="mb-4">Balance: {balance} SATSTD</p>
-
           <div className="mb-4">
             <label className="block mb-1">Mint Amount:</label>
             <input
@@ -177,7 +181,6 @@ export default function App() {
               {loading ? 'Processing...' : 'Mint'}
             </button>
           </div>
-
           <div>
             <label className="block mb-1">Burn Amount:</label>
             <input
