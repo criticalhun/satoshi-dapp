@@ -10,6 +10,9 @@ const CONTRACT_ABI = [
   "function burn(address from, uint256 amount)"
 ];
 
+// Sepolia chain ID constant
+const SEPOLIA_CHAIN_ID = 11155111;
+
 export default function App() {
   const [provider, setProvider] = useState(null);
   const [signer, setSigner] = useState(null);
@@ -19,11 +22,24 @@ export default function App() {
   const [burnAmount, setBurnAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
+  const [chainId, setChainId] = useState(null);
 
   useEffect(() => {
     if (window.ethereum) {
+      // Initialize provider
       const prov = new ethers.BrowserProvider(window.ethereum);
       setProvider(prov);
+
+      // Fetch initial chainId
+      window.ethereum
+        .request({ method: 'eth_chainId' })
+        .then(id => setChainId(parseInt(id, 16)))
+        .catch(() => setChainId(null));
+
+      // Listen for network changes
+      window.ethereum.on('chainChanged', hex => {
+        setChainId(parseInt(hex, 16));
+      });
     } else {
       setMessage({ text: "MetaMask not detected", type: "error" });
     }
@@ -49,7 +65,9 @@ export default function App() {
       const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
       const bal = await contract.balanceOf(address);
       setBalance(ethers.formatUnits(bal, 18));
-    } catch {}
+    } catch {
+      // silent
+    }
   }
 
   async function handleMint() {
@@ -90,14 +108,40 @@ export default function App() {
 
   return (
     <div className="p-4 max-w-md mx-auto">
+      {/* Network switch warning banner */}
+      {chainId !== SEPOLIA_CHAIN_ID && (
+        <div className="w-full bg-yellow-200 text-yellow-800 p-3 text-center font-medium">
+          ⚠️ A dApp csak a Sepolia teszthálózaton működik.
+          <button
+            onClick={async () => {
+              try {
+                await window.ethereum.request({
+                  method: 'wallet_switchEthereumChain',
+                  params: [{ chainId: '0xaa36a7' }], // 11155111 in hex
+                });
+              } catch (err) {
+                console.error('Hálózatváltási hiba:', err);
+              }
+            }}
+            className="ml-4 px-3 py-1 bg-yellow-800 text-white rounded"
+          >
+            Váltás Sepoliára
+          </button>
+        </div>
+      )}
+
       <h1 className="text-2xl font-bold mb-4">Satoshi Standard dApp</h1>
 
       {message.text && (
-        <div className={`mb-4 p-2 rounded ${
-          message.type === "success" ? 'bg-green-100 text-green-800' :
-          message.type === "error"   ? 'bg-red-100   text-red-800' :
-                                        'bg-blue-100  text-blue-800'
-        }`}>
+        <div
+          className={`mb-4 p-2 rounded ${
+            message.type === "success"
+              ? 'bg-green-100 text-green-800'
+              : message.type === "error"
+              ? 'bg-red-100 text-red-800'
+              : 'bg-blue-100 text-blue-800'
+          }`}
+        >
           {message.text}
         </div>
       )}
@@ -120,7 +164,7 @@ export default function App() {
             <input
               type="text"
               value={mintAmount}
-              onChange={(e) => setMintAmount(e.target.value)}
+              onChange={e => setMintAmount(e.target.value)}
               className="w-full p-2 border rounded"
               placeholder="0.0"
               disabled={loading}
@@ -139,7 +183,7 @@ export default function App() {
             <input
               type="text"
               value={burnAmount}
-              onChange={(e) => setBurnAmount(e.target.value)}
+              onChange={e => setBurnAmount(e.target.value)}
               className="w-full p-2 border rounded"
               placeholder="0.0"
               disabled={loading}
@@ -157,4 +201,3 @@ export default function App() {
     </div>
   );
 }
-
