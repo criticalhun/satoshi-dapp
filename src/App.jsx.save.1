@@ -1,0 +1,93 @@
+import React, { useEffect, useState } from "react";
+import { ethers } from "ethers";
+
+const CONTRACT_ADDRESS = "0x49ffdeF28EC2AFb9C0930a9Cc4aec6733F3b5d83";
+const CONTRACT_ABI = [
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function balanceOf(address) view returns (uint256)",
+  "function mint(address to, uint256 amount)",
+  "function burn(address from, uint256 amount)"
+];
+
+export default function App() {
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [account, setAccount] = useState("");
+  const [balance, setBalance] = useState("0");
+  const [mintAmount, setMintAmount] = useState("");
+  const [burnAmount, setBurnAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ text: "", type: "" });
+
+  useEffect(() => {
+    if (window.ethereum) {
+      const prov = new ethers.BrowserProvider(window.ethereum);
+      setProvider(prov);
+    } else {
+      setMessage({ text: "MetaMask not detected", type: "error" });
+    }
+  }, []);
+
+  async function connectWallet() {
+    try {
+      setLoading(true);
+      const accounts = await provider.send("eth_requestAccounts", []);
+      setAccount(accounts[0]);
+      setSigner(await provider.getSigner());
+      await fetchBalance(accounts[0]);
+      setMessage({ text: "Wallet connected", type: "success" });
+    } catch {
+      setMessage({ text: "Connection failed", type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchBalance(address) {
+    try {
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+      const bal = await contract.balanceOf(address);
+      setBalance(ethers.formatUnits(bal, 18));
+    } catch {}
+  }
+
+  async function handleMint() {
+    try {
+      setLoading(true);
+      setMessage({ text: "Processing mint...", type: "info" });
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+      const wei = ethers.parseUnits(mintAmount || "0", 18);
+      const tx = await contract.mint(account, wei);
+      await tx.wait();
+      await fetchBalance(account);
+      setMessage({ text: `Minted ${mintAmount} SATSTD`, type: "success" });
+      setMintAmount("");
+    } catch {
+      setMessage({ text: "Mint failed", type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBurn() {
+    try {
+      setLoading(true);
+      setMessage({ text: "Processing burn...", type: "info" });
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+      const wei = ethers.parseUnits(burnAmount || "0", 18);
+      const tx = await contract.burn(account, wei);
+      await tx.wait();
+      await fetchBalance(account);
+      setMessage({ text: `Burned ${burnAmount} SATSTD`, type: "success" });
+      setBurnAmount("");
+    } catch {
+      setMessage({ text: "Burn failed", type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="p-4 max-w-md mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Satoshi S
