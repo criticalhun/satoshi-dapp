@@ -8,6 +8,9 @@ import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
 import { formatToken, formatSatsToBTC, shortenAddress } from "./utils/helpers";
 
+// !! Kép importálása (feltételezve: src/assets/satoshi-standard.jpeg)
+import satoshiStandardImage from "./assets/satoshi-standard.jpeg";
+
 // Sepolia Chainlink BTC/USD Proof of Reserve feed
 const CONTRACT_ADDRESS = "0x97C444c55Acd050645D4F2cc6498BdC10e86E9d8";
 const FEED_ADDRESS = "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43";
@@ -29,7 +32,6 @@ const CYPRESS_TEST_ACCOUNT = "0x1234567890abcdef1234567890abcdef12345678";
 
 export default function App() {
   const isTest = typeof window.Cypress !== "undefined";
-
   // --- State
   const [provider, setProvider] = useState(null);
   const [signer, setSigner] = useState(null);
@@ -53,6 +55,15 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches);
   const [showQR, setShowQR] = useState(false);
 
+  // --- DARK MODE: Set .dark class on <html> dynamically ---
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
   // --- Provider setup + auto account check ---
   useEffect(() => {
     if (isTest) {
@@ -67,11 +78,9 @@ export default function App() {
     const prov = new ethers.providers.Web3Provider(window.ethereum);
     setProvider(prov);
 
-    // Get current chainId
     window.ethereum.request({ method: "eth_chainId" })
       .then(hex => setChainId(parseInt(hex, 16)));
 
-    // Listen for chain/account changes
     if (typeof window.ethereum.on === "function") {
       window.ethereum.on("chainChanged", (hex) => {
         const id = parseInt(hex, 16);
@@ -88,7 +97,6 @@ export default function App() {
       });
     }
 
-    // Auto-connect: if wallet previously authorized, connect automatically
     window.ethereum.request({ method: "eth_accounts" }).then((accs) => {
       if (accs && accs[0]) {
         setAccount(accs[0]);
@@ -153,7 +161,6 @@ export default function App() {
         parseFloat(ethers.utils.formatUnits(supply, 18))
       );
       setMintableMax(maxMint.toString());
-
       // Reserve warning logic
       const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
       const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
@@ -164,7 +171,6 @@ export default function App() {
       } else {
         setReserveWarning("");
       }
-
       setProgress(
         reserveNum > 0 ? Math.min(100, (supplyNum / reserveNum) * 100) : 0
       );
@@ -306,6 +312,18 @@ export default function App() {
       >
         {darkMode ? "🌙" : "☀️"}
       </button>
+
+      {/* SATOSHI HERO IMAGE */}
+      <div className="w-full flex justify-center items-center mt-4">
+        <img
+          src={satoshiStandardImage}
+          alt="Satoshi Standard"
+          className="w-[380px] max-w-full rounded-2xl shadow-lg border border-gray-800 dark:border-gray-300 mb-5"
+          style={{
+            background: "linear-gradient(90deg, #091921 0%, #111B2B 100%)"
+          }}
+        />
+      </div>
 
       {/* QR-kód modal */}
       {showQR && (
