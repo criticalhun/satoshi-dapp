@@ -1,8 +1,12 @@
 // src/App.js
 import React, { useEffect, useState } from "react";
 import NetworkBanner from "./components/NetworkBanner";
+import MintController from "./components/MintController";
+import BurnController from "./components/BurnController";
+import OwnerPanel from "./components/OwnerPanel";
 import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
+import { formatToken, formatSatsToBTC, shortenAddress } from "./utils/helpers";
 
 // Sepolia Chainlink BTC/USD Proof of Reserve feed
 const CONTRACT_ADDRESS = "0x97C444c55Acd050645D4F2cc6498BdC10e86E9d8";
@@ -22,23 +26,6 @@ const FEED_ABI = [
 ];
 
 const CYPRESS_TEST_ACCOUNT = "0x1234567890abcdef1234567890abcdef12345678";
-
-// --- helpers --- //
-function formatToken(amount, decimals = 8, currency = "SATSTD") {
-  if (!amount) return "0";
-  const num = Number(amount);
-  if (isNaN(num)) return amount;
-  return num.toLocaleString("en-US", { maximumFractionDigits: decimals }) + ` ${currency}`;
-}
-function formatSatsToBTC(amount) {
-  if (!amount) return "0";
-  const btc = Number(amount) / 1e8;
-  return btc.toLocaleString("en-US", { maximumFractionDigits: 8 }) + " BTC";
-}
-function shortenAddress(addr) {
-  if (!addr) return "";
-  return addr.slice(0, 6) + "..." + addr.slice(-4);
-}
 
 export default function App() {
   const isTest = typeof window.Cypress !== "undefined";
@@ -66,49 +53,54 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches);
   const [showQR, setShowQR] = useState(false);
 
-  // --- Network detection ---
+  // --- Provider setup + auto account check ---
   useEffect(() => {
     if (isTest) {
       setChainId(11155111);
+      setAccount(CYPRESS_TEST_ACCOUNT);
       return;
     }
-    if (!window.ethereum) return;
-    const raw = window.ethereum.chainId;
-    if (raw != null) {
-      const parsed = typeof raw === "string" ? parseInt(raw, 16) : raw;
-      setChainId(parsed);
+    if (!window.ethereum) {
+      setMessage({ text: "MetaMask not detected", type: "error" });
+      return;
     }
+    const prov = new ethers.providers.Web3Provider(window.ethereum);
+    setProvider(prov);
+
+    // Get current chainId
+    window.ethereum.request({ method: "eth_chainId" })
+      .then(hex => setChainId(parseInt(hex, 16)));
+
+    // Listen for chain/account changes
     if (typeof window.ethereum.on === "function") {
       window.ethereum.on("chainChanged", (hex) => {
         const id = parseInt(hex, 16);
         setChainId(id);
       });
+      window.ethereum.on("accountsChanged", (accs) => {
+        if (accs && accs[0]) {
+          setAccount(accs[0]);
+          setSigner(prov.getSigner());
+          fetchChainData(prov, accs[0]);
+        } else {
+          setAccount("");
+        }
+      });
     }
+
+    // Auto-connect: if wallet previously authorized, connect automatically
+    window.ethereum.request({ method: "eth_accounts" }).then((accs) => {
+      if (accs && accs[0]) {
+        setAccount(accs[0]);
+        setSigner(prov.getSigner());
+        fetchChainData(prov, accs[0]);
+      }
+    });
   }, [isTest]);
 
   const isNetworkAllowed = chainId === 11155111;
 
-  // --- Auto-connect if already authorized ---
-  useEffect(() => {
-    if (!isTest && provider && isNetworkAllowed && window.ethereum.selectedAddress) {
-      connectWallet();
-    }
-  }, [provider, chainId, isTest]); // eslint-disable-line
-
-  // --- Provider setup (Only in prod/test) ---
-  useEffect(() => {
-    if (!isTest) {
-      if (window.ethereum && window.ethereum.request) {
-        const prov = new ethers.providers.Web3Provider(window.ethereum);
-        setProvider(prov);
-        fetchChainData(prov);
-      } else {
-        setMessage({ text: "MetaMask not detected", type: "error" });
-      }
-    }
-  }, [isTest]); // eslint-disable-line
-
-  // --- Connect wallet (Cypress and prod) ---
+  // --- Connect wallet (always callable) ---
   async function connectWallet() {
     if (isTest) {
       setAccount(CYPRESS_TEST_ACCOUNT);
@@ -124,17 +116,14 @@ export default function App() {
     }
     try {
       setLoading(true);
-      const accounts = await provider.send("eth_requestAccounts", []);
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
       const user = accounts[0];
       setAccount(user);
-
       const newSigner = provider.getSigner();
       setSigner(newSigner);
-
       const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, provider);
       const ownerAddress = await token.owner();
       setIsOwner(ownerAddress.toLowerCase() === user.toLowerCase());
-
       await fetchChainData(provider, user);
       setMessage({ text: "Wallet connected", type: "success" });
     } catch (e) {
@@ -379,7 +368,7 @@ export default function App() {
           {!account ? (
             <button
               onClick={connectWallet}
-              disabled={loading || (!isNetworkAllowed && !isTest)}
+              disabled={loading || !isNetworkAllowed}
               className="w-full py-2 bg-gradient-to-r from-blue-600 to-blue-400 dark:from-blue-800 dark:to-blue-600 text-white rounded-xl font-bold text-lg shadow disabled:opacity-50 flex justify-center items-center"
             >
               {loading && (
@@ -419,140 +408,37 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                {/* Mint */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 dark:text-gray-100">
-                    Mint Amount{" "}
-                    <Tooltip text="You can only mint up to the remaining reserve.">
-                      <span className="ml-1 text-xs text-gray-400">ⓘ</span>
-                    </Tooltip>
-                  </label>
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      aria-label="mint"
-                      value={mintAmount}
-                      onChange={(e) => setMintAmount(e.target.value)}
-                      disabled={loading || (!isNetworkAllowed && !isTest)}
-                      className="flex-1 p-2 border rounded dark:bg-gray-700 dark:text-white"
-                      placeholder="0.0"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setMintAmount(mintableMax)}
-                      className="px-2 bg-blue-200 dark:bg-blue-800 rounded text-xs font-bold hover:bg-blue-300 dark:hover:bg-blue-700 transition"
-                      disabled={mintableMax === "0"}
-                    >
-                      Max
-                    </button>
-                    <button
-                      onClick={handleMint}
-                      disabled={
-                        loading ||
-                        (!isNetworkAllowed && !isTest) ||
-                        !mintAmount ||
-                        parseFloat(mintAmount) === 0 ||
-                        parseFloat(mintAmount) > parseFloat(mintableMax)
-                      }
-                      className="px-4 bg-green-600 dark:bg-green-800 text-white rounded disabled:opacity-50 flex items-center"
-                    >
-                      {loading ? (
-                        <span className="loader mr-1 w-3 h-3 border-2 border-white border-t-green-600 rounded-full animate-spin"></span>
-                      ) : null}
-                      {loading ? "Processing..." : "Mint"}
-                    </button>
-                  </div>
-                  {mintAmount &&
-                    parseFloat(mintAmount) > parseFloat(mintableMax) && (
-                      <div className="text-xs text-red-500 mt-1">
-                        Not enough BTC reserve for this mint.
-                      </div>
-                    )}
-                </div>
+                {/* MintController */}
+                <MintController
+                  mintAmount={mintAmount}
+                  setMintAmount={setMintAmount}
+                  mintableMax={mintableMax}
+                  loading={loading}
+                  isNetworkAllowed={isNetworkAllowed}
+                  isTest={isTest}
+                  handleMint={handleMint}
+                />
 
-                {/* Burn */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-800 dark:text-gray-100">
-                    Burn Amount{" "}
-                    <Tooltip text="You can only burn what you have.">
-                      <span className="ml-1 text-xs text-gray-400">ⓘ</span>
-                    </Tooltip>
-                  </label>
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      aria-label="burn"
-                      value={burnAmount}
-                      onChange={(e) => setBurnAmount(e.target.value)}
-                      disabled={loading || (!isNetworkAllowed && !isTest)}
-                      className="flex-1 p-2 border rounded dark:bg-gray-700 dark:text-white"
-                      placeholder="0.0"
-                    />
-                    <button
-                      onClick={handleBurn}
-                      disabled={
-                        loading ||
-                        (!isNetworkAllowed && !isTest) ||
-                        !burnAmount ||
-                        parseFloat(burnAmount) === 0 ||
-                        parseFloat(burnAmount) > parseFloat(balance)
-                      }
-                      className="px-4 bg-yellow-600 dark:bg-yellow-800 text-white rounded disabled:opacity-50 flex items-center"
-                    >
-                      {loading ? (
-                        <span className="loader mr-1 w-3 h-3 border-2 border-white border-t-yellow-600 rounded-full animate-spin"></span>
-                      ) : null}
-                      {loading ? "Processing..." : "Burn"}
-                    </button>
-                  </div>
-                  {burnAmount && parseFloat(burnAmount) > parseFloat(balance) && (
-                    <div className="text-xs text-red-500 mt-1">
-                      Insufficient token balance to burn.
-                    </div>
-                  )}
-                </div>
+                {/* BurnController */}
+                <BurnController
+                  burnAmount={burnAmount}
+                  setBurnAmount={setBurnAmount}
+                  balance={balance}
+                  loading={loading}
+                  isNetworkAllowed={isNetworkAllowed}
+                  isTest={isTest}
+                  handleBurn={handleBurn}
+                />
 
-                {/* Set Reserve */}
+                {/* Kiszervezett owner funkciók */}
                 {isOwner && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-800 dark:text-gray-100">
-                      Set Mock PoR Backing (satoshi){" "}
-                      <Tooltip text="Reserve cannot be set below total supply!">
-                        <span className="ml-1 text-xs text-gray-400">ⓘ</span>
-                      </Tooltip>
-                    </label>
-                    <div className="flex space-x-2">
-                      <input
-                        type="number"
-                        value={newBacking}
-                        onChange={(e) => setNewBacking(e.target.value)}
-                        disabled={loading}
-                        className="flex-1 p-2 border rounded dark:bg-gray-700 dark:text-white"
-                        placeholder="e.g. 1000000"
-                      />
-                      <button
-                        onClick={handleSetPoR}
-                        disabled={
-                          loading ||
-                          !newBacking ||
-                          isNaN(newBacking) ||
-                          parseFloat(newBacking) < parseFloat(totalSupply)
-                        }
-                        className="px-4 bg-purple-600 dark:bg-purple-800 text-white rounded disabled:opacity-50 flex items-center"
-                      >
-                        {loading ? (
-                          <span className="loader mr-1 w-3 h-3 border-2 border-white border-t-purple-600 rounded-full animate-spin"></span>
-                        ) : null}
-                        {loading ? "Updating..." : "Set"}
-                      </button>
-                    </div>
-                    {newBacking &&
-                      parseFloat(newBacking) < parseFloat(totalSupply) && (
-                        <div className="text-xs text-red-500 mt-1">
-                          Reserve cannot be set below current total supply!
-                        </div>
-                      )}
-                  </div>
+                  <OwnerPanel
+                    newBacking={newBacking}
+                    setNewBacking={setNewBacking}
+                    loading={loading}
+                    totalSupply={totalSupply}
+                    handleSetPoR={handleSetPoR}
+                  />
                 )}
               </div>
             </>
