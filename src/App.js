@@ -8,10 +8,6 @@ import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
 import { formatToken, formatSatsToBTC, shortenAddress } from "./utils/helpers";
 
-// !! Kép importálása (feltételezve: src/assets/satoshi-standard.jpeg)
-import satoshiStandardImage from "./assets/satoshi-standard.jpeg";
-
-// Sepolia Chainlink BTC/USD Proof of Reserve feed
 const CONTRACT_ADDRESS = "0x97C444c55Acd050645D4F2cc6498BdC10e86E9d8";
 const FEED_ADDRESS = "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43";
 
@@ -32,7 +28,6 @@ const CYPRESS_TEST_ACCOUNT = "0x1234567890abcdef1234567890abcdef12345678";
 
 export default function App() {
   const isTest = typeof window.Cypress !== "undefined";
-  // --- State
   const [provider, setProvider] = useState(null);
   const [signer, setSigner] = useState(null);
   const [account, setAccount] = useState("");
@@ -142,7 +137,6 @@ export default function App() {
     }
   }
 
-  // --- Fetch chain data ---
   async function fetchChainData(_provider = provider, addr = account) {
     try {
       const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
@@ -161,13 +155,10 @@ export default function App() {
         parseFloat(ethers.utils.formatUnits(supply, 18))
       );
       setMintableMax(maxMint.toString());
-      // Reserve warning logic
       const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
       const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
       if (reserveNum > 0 && supplyNum / reserveNum > 0.9) {
-        setReserveWarning(
-          "Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!"
-        );
+        setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
       } else {
         setReserveWarning("");
       }
@@ -179,7 +170,6 @@ export default function App() {
     }
   }
 
-  // --- Mint ---
   async function handleMint() {
     if (!isNetworkAllowed && !isTest) return;
     const amount = parseFloat(mintAmount || "0");
@@ -216,7 +206,6 @@ export default function App() {
     }
   }
 
-  // --- Burn ---
   async function handleBurn() {
     if (!isNetworkAllowed && !isTest) return;
     const amount = parseFloat(burnAmount || "0");
@@ -253,7 +242,6 @@ export default function App() {
     }
   }
 
-  // --- Set PoR (Sepolia-n nem elérhető, csak mock feeden) ---
   async function handleSetPoR() {
     if (!isOwner && !isTest) return;
     if (!newBacking || isNaN(newBacking)) {
@@ -312,18 +300,6 @@ export default function App() {
       >
         {darkMode ? "🌙" : "☀️"}
       </button>
-
-      {/* SATOSHI HERO IMAGE */}
-      <div className="w-full flex justify-center items-center mt-4">
-        <img
-          src={satoshiStandardImage}
-          alt="Satoshi Standard"
-          className="w-[380px] max-w-full rounded-2xl shadow-lg border border-gray-800 dark:border-gray-300 mb-5"
-          style={{
-            background: "linear-gradient(90deg, #091921 0%, #111B2B 100%)"
-          }}
-        />
-      </div>
 
       {/* QR-kód modal */}
       {showQR && (
@@ -419,14 +395,10 @@ export default function App() {
                   Total supply: {formatToken(totalSupply)}
                 </p>
               </div>
-
-              {/* Mintable max info */}
               <div className="text-xs text-blue-700 dark:text-blue-400 text-center font-mono mb-2">
                 Your mintable max: <span>{formatToken(mintableMax)}</span> SATSTD
               </div>
-
               <div className="space-y-4">
-                {/* MintController */}
                 <MintController
                   mintAmount={mintAmount}
                   setMintAmount={setMintAmount}
@@ -436,8 +408,6 @@ export default function App() {
                   isTest={isTest}
                   handleMint={handleMint}
                 />
-
-                {/* BurnController */}
                 <BurnController
                   burnAmount={burnAmount}
                   setBurnAmount={setBurnAmount}
@@ -447,8 +417,6 @@ export default function App() {
                   isTest={isTest}
                   handleBurn={handleBurn}
                 />
-
-                {/* Kiszervezett owner funkciók */}
                 {isOwner && (
                   <OwnerPanel
                     newBacking={newBacking}
