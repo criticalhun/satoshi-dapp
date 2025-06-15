@@ -3,22 +3,33 @@ import React, { useEffect, useState } from "react";
 import NetworkBanner from "./components/NetworkBanner";
 import MintController from "./components/MintController";
 import BurnController from "./components/BurnController";
-import OwnerPanel from "./components/OwnerPanel";
 import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
 import { formatToken, formatSatsToBTC, shortenAddress } from "./utils/helpers";
 
-const CONTRACT_ADDRESS = "0x97C444c55Acd050645D4F2cc6498BdC10e86E9d8";
+// Role hash-ek
+const ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ADMIN_ROLE"));
+const MINTER_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("MINTER_ROLE"));
+const PAUSER_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("PAUSER_ROLE"));
+const OPERATOR_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("OPERATOR_ROLE"));
+
+// Címek
+const CONTRACT_ADDRESS = "0xa86F8D5EE503e52bc8405A54E1C5f163d3D3eF8a";
 const FEED_ADDRESS = "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43";
 
+// ABI
 const TOKEN_ABI = [
   "function name() view returns (string)",
   "function symbol() view returns (string)",
   "function balanceOf(address) view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
   "function mint(address to, uint256 amount) external",
   "function burn(address from, uint256 amount) external",
-  "function owner() view returns (address)",
-  "function totalSupply() view returns (uint256)",
+  "function hasRole(bytes32 role, address account) view returns (bool)",
+  "function setReserveFeed(address newFeed) external",
+  "function pause() external",
+  "function unpause() external",
+  "function paused() view returns (bool)"
 ];
 const FEED_ABI = [
   "function latestAnswer() view returns (int256)",
@@ -36,8 +47,7 @@ export default function App() {
   const [totalSupply, setTotalSupply] = useState("0");
   const [mintAmount, setMintAmount] = useState("");
   const [burnAmount, setBurnAmount] = useState("");
-  const [newBacking, setNewBacking] = useState("");
-  const [isOwner, setIsOwner] = useState(false);
+  const [newFeed, setNewFeed] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
   const [chainId, setChainId] = useState(isTest ? 11155111 : null);
@@ -46,24 +56,29 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [copied, setCopied] = useState(false);
 
-  // --- UI state for dark mode and QR modal
-  const [darkMode, setDarkMode] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+  // Role flags
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isOperator, setIsOperator] = useState(false);
+  const [isMinter, setIsMinter] = useState(false);
+  const [isPauser, setIsPauser] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+
+  // UI state for QR modal
   const [showQR, setShowQR] = useState(false);
 
-  // --- DARK MODE: Set .dark class on <html> dynamically ---
+  // DARK MODE automatikus (OS based)
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
+    const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    if (prefersDark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  }, []);
 
-  // --- Provider setup + auto account check ---
+  // Provider setup + auto account check
   useEffect(() => {
     if (isTest) {
       setChainId(11155111);
       setAccount(CYPRESS_TEST_ACCOUNT);
+      setIsAdmin(true); setIsOperator(true); setIsMinter(true); setIsPauser(true);
       return;
     }
     if (!window.ethereum) {
@@ -73,22 +88,17 @@ export default function App() {
     const prov = new ethers.providers.Web3Provider(window.ethereum);
     setProvider(prov);
 
-    window.ethereum.request({ method: "eth_chainId" })
-      .then(hex => setChainId(parseInt(hex, 16)));
+    window.ethereum.request({ method: "eth_chainId" }).then(hex => setChainId(parseInt(hex, 16)));
 
     if (typeof window.ethereum.on === "function") {
-      window.ethereum.on("chainChanged", (hex) => {
-        const id = parseInt(hex, 16);
-        setChainId(id);
-      });
+      window.ethereum.on("chainChanged", (hex) => setChainId(parseInt(hex, 16)));
       window.ethereum.on("accountsChanged", (accs) => {
         if (accs && accs[0]) {
           setAccount(accs[0]);
           setSigner(prov.getSigner());
+          fetchAllRoles(prov, accs[0]);
           fetchChainData(prov, accs[0]);
-        } else {
-          setAccount("");
-        }
+        } else setAccount("");
       });
     }
 
@@ -96,6 +106,7 @@ export default function App() {
       if (accs && accs[0]) {
         setAccount(accs[0]);
         setSigner(prov.getSigner());
+        fetchAllRoles(prov, accs[0]);
         fetchChainData(prov, accs[0]);
       }
     });
@@ -103,11 +114,11 @@ export default function App() {
 
   const isNetworkAllowed = chainId === 11155111;
 
-  // --- Connect wallet (always callable) ---
+  // --- CONNECT WALLET (hiányzott!) ---
   async function connectWallet() {
     if (isTest) {
       setAccount(CYPRESS_TEST_ACCOUNT);
-      setIsOwner(true);
+      setIsAdmin(true); setIsOperator(true); setIsMinter(true); setIsPauser(true);
       setBalance("0");
       setPoReserve("1000000000000000000");
       setTotalSupply("0");
@@ -124,9 +135,7 @@ export default function App() {
       setAccount(user);
       const newSigner = provider.getSigner();
       setSigner(newSigner);
-      const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, provider);
-      const ownerAddress = await token.owner();
-      setIsOwner(ownerAddress.toLowerCase() === user.toLowerCase());
+      await fetchAllRoles(provider, user);
       await fetchChainData(provider, user);
       setMessage({ text: "Wallet connected", type: "success" });
     } catch (e) {
@@ -137,24 +146,41 @@ export default function App() {
     }
   }
 
+  // Lekérdezi a role-okat
+  async function fetchAllRoles(_provider, addr) {
+    try {
+      const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
+      setIsAdmin(await token.hasRole(ADMIN_ROLE, addr));
+      setIsOperator(await token.hasRole(OPERATOR_ROLE, addr));
+      setIsMinter(await token.hasRole(MINTER_ROLE, addr));
+      setIsPauser(await token.hasRole(PAUSER_ROLE, addr));
+      setIsPaused(await token.paused());
+    } catch {}
+  }
+
+  // Fetch chain data (balance, reserve, supply, paused)
   async function fetchChainData(_provider = provider, addr = account) {
     try {
       const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
       const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
-      const [bal, reserve, supply] = await Promise.all([
+      const [bal, reserve, supply, paused] = await Promise.all([
         addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
         feed.latestAnswer(),
         token.totalSupply(),
+        token.paused(),
       ]);
       setBalance(ethers.utils.formatUnits(bal, 18));
       setPoReserve(reserve.toString());
       setTotalSupply(ethers.utils.formatUnits(supply, 18));
+      setIsPaused(paused);
+
       const maxMint = Math.max(
         0,
         parseFloat(ethers.utils.formatUnits(reserve, 18)) -
         parseFloat(ethers.utils.formatUnits(supply, 18))
       );
       setMintableMax(maxMint.toString());
+      // Reserve warning logic
       const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
       const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
       if (reserveNum > 0 && supplyNum / reserveNum > 0.9) {
@@ -162,14 +188,13 @@ export default function App() {
       } else {
         setReserveWarning("");
       }
-      setProgress(
-        reserveNum > 0 ? Math.min(100, (supplyNum / reserveNum) * 100) : 0
-      );
+      setProgress(reserveNum > 0 ? Math.min(100, (supplyNum / reserveNum) * 100) : 0);
     } catch (e) {
       setReserveWarning("");
     }
   }
 
+  // --- Mint ---
   async function handleMint() {
     if (!isNetworkAllowed && !isTest) return;
     const amount = parseFloat(mintAmount || "0");
@@ -206,6 +231,7 @@ export default function App() {
     }
   }
 
+  // --- Burn ---
   async function handleBurn() {
     if (!isNetworkAllowed && !isTest) return;
     const amount = parseFloat(burnAmount || "0");
@@ -242,33 +268,50 @@ export default function App() {
     }
   }
 
-  async function handleSetPoR() {
-    if (!isOwner && !isTest) return;
-    if (!newBacking || isNaN(newBacking)) {
-      setMessage({ text: "Please enter a number", type: "error" });
+  // --- Reserve Feed váltás ---
+  async function handleSetFeed() {
+    if (!isOperator && !isAdmin) {
+      setMessage({ text: "Not authorized.", type: "error" });
       return;
     }
-    if (parseFloat(newBacking) < parseFloat(totalSupply)) {
-      setMessage({ text: "Reserve cannot be set below total supply!", type: "error" });
+    if (!newFeed || !ethers.utils.isAddress(newFeed)) {
+      setMessage({ text: "Invalid address.", type: "error" });
       return;
     }
     try {
       setLoading(true);
-      if (isTest) {
-        setPoReserve(newBacking);
-        setMintableMax((parseFloat(newBacking) - parseFloat(totalSupply)).toString());
-        setMessage({ text: "PoR backing updated.", type: "success" });
-        setNewBacking("");
-        setTimeout(() => setMessage({ text: "", type: "" }), 2000);
-        setLoading(false);
-        return;
-      }
-      setMessage({ text: "PoR update only available with a mock feed. (Not supported by Chainlink PoR)", type: "error" });
+      const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, signer);
+      const tx = await token.setReserveFeed(newFeed);
+      setMessage({ text: "Feed address update sent...", type: "info" });
+      await tx.wait();
+      setMessage({ text: "Reserve feed changed!", type: "success" });
+      setTimeout(() => setMessage({ text: "", type: "" }), 2000);
     } catch (e) {
-      setMessage({ text: "PoR update failed", type: "error" });
+      setMessage({ text: "Feed update failed", type: "error" });
     } finally {
       setLoading(false);
+    }
+  }
+
+  // --- Pause/Unpause ---
+  async function handlePause() {
+    if (!isPauser && !isOperator && !isAdmin) {
+      setMessage({ text: "Not authorized.", type: "error" });
+      return;
+    }
+    try {
+      setLoading(true);
+      const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, signer);
+      const tx = await (isPaused ? token.unpause() : token.pause());
+      setMessage({ text: isPaused ? "Unpausing..." : "Pausing..." });
+      await tx.wait();
+      setIsPaused(!isPaused);
+      setMessage({ text: isPaused ? "Unpaused." : "Paused." });
       setTimeout(() => setMessage({ text: "", type: "" }), 2000);
+    } catch (e) {
+      setMessage({ text: "Pause/unpause failed", type: "error" });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -291,16 +334,7 @@ export default function App() {
   }
 
   return (
-    <div className={darkMode ? "dark" : ""}>
-      {/* Sötét mód váltó gomb */}
-      <button
-        className="absolute top-4 right-4 text-2xl z-50 focus:outline-none"
-        onClick={() => setDarkMode(dm => !dm)}
-        title="Toggle dark mode"
-      >
-        {darkMode ? "🌙" : "☀️"}
-      </button>
-
+    <div>
       {/* QR-kód modal */}
       {showQR && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50" onClick={() => setShowQR(false)}>
@@ -398,6 +432,44 @@ export default function App() {
               <div className="text-xs text-blue-700 dark:text-blue-400 text-center font-mono mb-2">
                 Your mintable max: <span>{formatToken(mintableMax)}</span> SATSTD
               </div>
+              {/* FEED váltás csak admin/operator */}
+              {(isAdmin || isOperator) && (
+                <div>
+                  <label className="block text-xs font-bold mb-1 text-gray-800 dark:text-gray-100">
+                    Reserve Feed Change (admin/operator)
+                  </label>
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      className="flex-1 p-2 border rounded dark:bg-gray-700 dark:text-white text-xs"
+                      placeholder="New Feed Address (0x...)"
+                      value={newFeed}
+                      onChange={e => setNewFeed(e.target.value)}
+                    />
+                    <button
+                      onClick={handleSetFeed}
+                      disabled={loading || !ethers.utils.isAddress(newFeed)}
+                      className="px-3 bg-purple-700 dark:bg-purple-900 text-white rounded disabled:opacity-60 text-xs"
+                    >
+                      Set Feed
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* PAUSE gomb csak pauser/admin/operator */}
+              {(isPauser || isAdmin || isOperator) && (
+                <button
+                  onClick={handlePause}
+                  disabled={loading}
+                  className={`w-full py-2 my-1 rounded font-bold text-xs ${
+                    isPaused
+                      ? "bg-orange-600 dark:bg-orange-900 text-white"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white"
+                  }`}
+                >
+                  {loading ? "Processing..." : isPaused ? "Unpause Contract" : "Pause Contract"}
+                </button>
+              )}
               <div className="space-y-4">
                 <MintController
                   mintAmount={mintAmount}
@@ -417,15 +489,6 @@ export default function App() {
                   isTest={isTest}
                   handleBurn={handleBurn}
                 />
-                {isOwner && (
-                  <OwnerPanel
-                    newBacking={newBacking}
-                    setNewBacking={setNewBacking}
-                    loading={loading}
-                    totalSupply={totalSupply}
-                    handleSetPoR={handleSetPoR}
-                  />
-                )}
               </div>
             </>
           )}

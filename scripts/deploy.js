@@ -1,25 +1,34 @@
-require('dotenv').config();
-const { ethers } = require("hardhat");
+// scripts/deploy.js
+
+const hre = require("hardhat");
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
-  console.log("Deploying contracts with:", deployer.address);
+  // 1. Címek beállítása (használj érvényes sepolia address-eket!)
+  const feedAddress = "0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43"; // Sepolia BTC/USD Chainlink feed
+  const admin   = "0x7aeEa25dbc54CA7589766bfD9B65671022e5B2C0";
+  const minter  = "0xd276E16774410A896eEDFa5ce905b09d6D59aCF9";
+  const pauser  = "0x21f22EF549Ddd88Cb70e17e8A1960f96883271ac";
+  const operator= "0x097280493702bF64c6dc5363FB48073A2d26f5C5";
 
-  // FONTOS: .env-ből veszi a címeket!
-  const feedAddress = process.env.CHAINLINK_FEED_ADDRESS;
-  const admin = deployer.address; // vagy process.env.ADMIN_ADDRESS, ha mást akarsz
+  // 2. Szerződés deploy
+  const SatoshiStandard = await hre.ethers.getContractFactory("SatoshiStandard");
+  const contract = await SatoshiStandard.deploy(
+    feedAddress,
+    admin,
+    minter,
+    pauser,
+    operator
+  );
 
-  if (!feedAddress) {
-    throw new Error("CHAINLINK_FEED_ADDRESS nincs megadva a .env-ben!");
-  }
+  await contract.deployed();
 
-  const SatoshiStandard = await ethers.getContractFactory("SatoshiStandard");
-  const satoshi = await SatoshiStandard.deploy(feedAddress, admin);
-  await satoshi.deployed();
-  console.log("SatoshiStandard deployed to:", satoshi.address);
+  // 3. Kimenet a konzolra
+  console.log("SatoshiStandard deployed to:", contract.address);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
