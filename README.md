@@ -1,3 +1,6 @@
+
+!!!!This project was created solely as a personal learning exercise and not for any personal gain. As a Hungarian citizen, I am fully aware of the new Hungarian Criminal Code, which prohibits private individuals from developing decentralized applications (dApps). My sole purpose in building this is educational.!!!
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
