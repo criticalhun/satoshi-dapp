@@ -1,4 +1,3 @@
-// src/App.js
 import React, { useEffect, useState } from "react";
 import NetworkBanner from "./components/NetworkBanner";
 import MintController from "./components/MintController";
@@ -73,6 +72,26 @@ export default function App() {
     else document.documentElement.classList.remove('dark');
   }, []);
 
+  // --- KEZDETI LOGIKA ---
+  // Ez a függvény feldolgozza a bejelentkezett fiókot és ellenőrzi a jogosultságát.
+  const processAndAuthorizeAccount = async (prov, addr) => {
+    const roles = await fetchAllRoles(prov, addr);
+    const isAuthorized = roles.isAdmin || roles.isOperator || roles.isMinter || roles.isPauser;
+
+    if (isAuthorized) {
+      setAccount(addr);
+      setSigner(prov.getSigner());
+      fetchChainData(prov, addr);
+    } else {
+      // Ha a felhasználó nem jogosult, töröljük az állapotot és hibaüzenetet küldünk.
+      setAccount("");
+      setSigner(null);
+      // A fetchAllRoles már alaphelyzetbe állította a role-okat false-ra.
+      setMessage({ text: "Access Denied: Your account does not have the required role.", type: "error" });
+      setTimeout(() => setMessage({ text: "", type: "" }), 3500);
+    }
+  };
+
   // Provider setup + auto account check
   useEffect(() => {
     if (isTest) {
@@ -94,29 +113,31 @@ export default function App() {
       window.ethereum.on("chainChanged", (hex) => setChainId(parseInt(hex, 16)));
       window.ethereum.on("accountsChanged", (accs) => {
         if (accs && accs[0]) {
-          setAccount(accs[0]);
-          setSigner(prov.getSigner());
-          fetchAllRoles(prov, accs[0]);
-          fetchChainData(prov, accs[0]);
-        } else setAccount("");
+          // Itt is ellenőrizzük a jogosultságot fiókváltáskor.
+          processAndAuthorizeAccount(prov, accs[0]);
+        } else {
+          setAccount("");
+          setSigner(null);
+          // Töröljük a role flag-eket is
+          setIsAdmin(false); setIsOperator(false); setIsMinter(false); setIsPauser(false);
+        }
       });
     }
 
+    // Oldalbetöltéskor is ellenőrizzük az esetlegesen már csatlakoztatott fiókot.
     window.ethereum.request({ method: "eth_accounts" }).then((accs) => {
       if (accs && accs[0]) {
-        setAccount(accs[0]);
-        setSigner(prov.getSigner());
-        fetchAllRoles(prov, accs[0]);
-        fetchChainData(prov, accs[0]);
+        processAndAuthorizeAccount(prov, accs[0]);
       }
     });
   }, [isTest]);
 
   const isNetworkAllowed = chainId === 11155111;
 
-  // --- CONNECT WALLET (hiányzott!) ---
+  // --- CONNECT WALLET (MÓDOSÍTVA) ---
   async function connectWallet() {
     if (isTest) {
+      // Cypress test logic remains the same
       setAccount(CYPRESS_TEST_ACCOUNT);
       setIsAdmin(true); setIsOperator(true); setIsMinter(true); setIsPauser(true);
       setBalance("0");
@@ -132,30 +153,65 @@ export default function App() {
       setLoading(true);
       const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
       const user = accounts[0];
-      setAccount(user);
-      const newSigner = provider.getSigner();
-      setSigner(newSigner);
-      await fetchAllRoles(provider, user);
-      await fetchChainData(provider, user);
-      setMessage({ text: "Wallet connected", type: "success" });
+      
+      // 1. Szerepkörök lekérdezése a jogosultság ellenőrzéséhez
+      const roles = await fetchAllRoles(provider, user);
+      const isAuthorized = roles.isAdmin || roles.isOperator || roles.isMinter || roles.isPauser;
+
+      // 2. Ellenőrzés és a csatlakozás befejezése vagy elutasítása
+      if (isAuthorized) {
+        setAccount(user);
+        const newSigner = provider.getSigner();
+        setSigner(newSigner);
+        await fetchChainData(provider, user);
+        setMessage({ text: "Wallet connected", type: "success" });
+      } else {
+        // Ha a felhasználó nem jogosult, nem fejezzük be a csatlakozást
+        setAccount("");
+        setSigner(null);
+        setMessage({ text: "Connection Failed: Your account is not authorized.", type: "error" });
+      }
     } catch (e) {
-      setMessage({ text: "Connection failed", type: "error" });
+      setMessage({ text: "Connection failed or rejected.", type: "error" });
     } finally {
       setLoading(false);
-      setTimeout(() => setMessage({ text: "", type: "" }), 2000);
+      setTimeout(() => setMessage({ text: "", type: "" }), 3000); // Hosszabb idő az üzenet olvasására
     }
   }
 
-  // Lekérdezi a role-okat
+  // Lekérdezi a role-okat ÉS VISSZAADJA ŐKET (MÓDOSÍTVA)
   async function fetchAllRoles(_provider, addr) {
+    // Ha nincs cím, mindent alaphelyzetbe állítunk
+    if (!addr || !_provider) {
+      setIsAdmin(false); setIsOperator(false); setIsMinter(false); setIsPauser(false);
+      return { isAdmin: false, isOperator: false, isMinter: false, isPauser: false };
+    }
     try {
       const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
-      setIsAdmin(await token.hasRole(ADMIN_ROLE, addr));
-      setIsOperator(await token.hasRole(OPERATOR_ROLE, addr));
-      setIsMinter(await token.hasRole(MINTER_ROLE, addr));
-      setIsPauser(await token.hasRole(PAUSER_ROLE, addr));
-      setIsPaused(await token.paused());
-    } catch {}
+      // Párhuzamosan kérjük le a szerepköröket a gyorsaság érdekében
+      const [isAdmin, isOperator, isMinter, isPauser, isPaused] = await Promise.all([
+        token.hasRole(ADMIN_ROLE, addr),
+        token.hasRole(OPERATOR_ROLE, addr),
+        token.hasRole(MINTER_ROLE, addr),
+        token.hasRole(PAUSER_ROLE, addr),
+        token.paused(),
+      ]);
+      
+      // Beállítjuk az állapotot a UI számára
+      setIsAdmin(isAdmin);
+      setIsOperator(isOperator);
+      setIsMinter(isMinter);
+      setIsPauser(isPauser);
+      setIsPaused(isPaused);
+
+      // Visszaadjuk az értékeket az azonnali ellenőrzéshez
+      return { isAdmin, isOperator, isMinter, isPauser };
+    } catch(e) {
+      console.error("Failed to fetch roles:", e);
+      // Hiba esetén is alaphelyzetbe állítunk mindent
+      setIsAdmin(false); setIsOperator(false); setIsMinter(false); setIsPauser(false);
+      return { isAdmin: false, isOperator: false, isMinter: false, isPauser: false };
+    }
   }
 
   // Fetch chain data (balance, reserve, supply, paused)
@@ -180,7 +236,7 @@ export default function App() {
         parseFloat(ethers.utils.formatUnits(supply, 18))
       );
       setMintableMax(maxMint.toString());
-      // Reserve warning logic
+      
       const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
       const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
       if (reserveNum > 0 && supplyNum / reserveNum > 0.9) {
@@ -335,7 +391,7 @@ export default function App() {
 
   return (
     <div>
-      {/* QR-kód modal */}
+      {/* A JSX (megjelenítési) rész változatlan maradt */}
       {showQR && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50" onClick={() => setShowQR(false)}>
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 flex flex-col items-center" onClick={e => e.stopPropagation()}>
@@ -358,7 +414,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Progress bar */}
           <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mb-2">
             <div
               className="h-3 bg-gradient-to-r from-green-400 to-lime-400 dark:from-green-600 dark:to-lime-600 transition-all duration-500"
@@ -432,7 +487,6 @@ export default function App() {
               <div className="text-xs text-blue-700 dark:text-blue-400 text-center font-mono mb-2">
                 Your mintable max: <span>{formatToken(mintableMax)}</span> SATSTD
               </div>
-              {/* FEED váltás csak admin/operator */}
               {(isAdmin || isOperator) && (
                 <div>
                   <label className="block text-xs font-bold mb-1 text-gray-800 dark:text-gray-100">
@@ -456,7 +510,6 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {/* PAUSE gomb csak pauser/admin/operator */}
               {(isPauser || isAdmin || isOperator) && (
                 <button
                   onClick={handlePause}
@@ -497,6 +550,3 @@ export default function App() {
     </div>
   );
 }
-
-// Tailwind CSS: loader
-// .loader { border-top-color: transparent; border-radius: 50%; border-style: solid; border-width: 2px; }
