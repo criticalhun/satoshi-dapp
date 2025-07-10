@@ -1,73 +1,80 @@
 
 !!!!This project was created solely as a personal learning exercise and not for any personal gain. As a Hungarian citizen, I am fully aware of the new Hungarian Criminal Code, which prohibits private individuals from developing decentralized applications (dApps). My sole purpose in building this is educational.!!!
 
-# Getting Started with Create React App
+Satoshi Standard dApp
+Satoshi Standard is a decentralized, Bitcoin-backed token system that brings value-based money logic back to the modern DeFi world.
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+🌟 Key Features
+BTC-backed: Every SATSTD token is fully backed by onchain or offchain Proof-of-Reserve BTC collateral.
 
-## Available Scripts
+Fully open source, transparent: All logic and transactions are auditable on-chain.
 
-In the project directory, you can run:
+Role-based governance: Multiple roles (admin, minter, operator, pauser) provide advanced, secure contract management.
 
-### `npm start`
+Pause/Unpause: The contract can be temporarily halted in case of critical bugs or attacks (emergency brake).
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Onchain auditing, events: All important functions emit their own event (Minted, Burned, FeedChanged, etc.).
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+Mobile-ready, modern React dApp: Web3 and MetaMask integration, QR code support, dark/light mode, live Proof of Reserve feed.
+🚀 What Makes Satoshi Standard Unique?
+“A modern reimagining of the gold standard, with Bitcoin as collateral.”
 
-### `npm test`
+Accessible, programmable, and truly hard money, bringing back value-backing to the monetary system.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Transparent: Anyone can verify that there is real BTC reserve backing the circulating tokens.
 
-### `npm run build`
+Decentralizable: Admin and key roles can be handed over to multisig or DAO governance.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+🧩 Main Features
+Mint (Token issuance)
+Only possible with minter, admin, or operator role.
 
-### `npm run eject`
+Only as many tokens can be minted as are backed by BTC, according to the live feed.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+Burn (Token burning)
+Only possible with burner, admin, or operator role.
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Burned tokens release the corresponding BTC reserve.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Reserve Feed Change
+Admin/operator can set a new Proof of Reserve feed address (e.g., Chainlink Aggregator or MockFeed).
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+Pause/Unpause
+Any time, with a single transaction, the entire system (minting/burning) can be temporarily paused.
 
-## Learn More
+👩‍💻 Technology Stack
+Smart contract: Solidity 0.8.x, OpenZeppelin AccessControl, ERC20, Pausable.
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Frontend: React + ethers.js, Tailwind CSS, QRCode.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+Dev tooling: Hardhat, Vercel (frontend deploy), GitHub Actions (build pipeline).
 
-### Code Splitting
+🛠️ Smart Contract - Key Roles
+Role	Permissions
+Admin	All functions, feed change, role management, pause/unpause
+Operator	All admin functions, mint/burn, feed change, pause/unpause
+Minter	Mint tokens
+Pauser	Pause/unpause
+Burner	Burn tokens
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+After deployment, all roles are assigned to the deployer. Roles can be transferred anytime!
+🌐 Demo, Public Addresses
+Sepolia Proof of Reserve Feed:
+0xD3D2A1EdCBCab8308224C8CaeA8964d399B819D3
 
-### Analyzing the Bundle Size
+Main token contract address:
+0xa86F8D5EE503e52bc8405A54E1C5f163d3D3eF8a
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+Live frontend demo:
+https://satoshi-dapp-t9ne.vercel.app
 
-### Making a Progressive Web App
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+📝 License
+The project is for authorized use only; further development and forks require the express permission of the author!
 
-### Advanced Configuration
+🤝 Community & Contact
+Email: criticalhun@proton.me
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Twitter: @CriticalHUN
