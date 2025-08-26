@@ -4,9 +4,11 @@ import MintController from "./components/MintController";
 import BurnController from "./components/BurnController";
 import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
-import { formatToken, formatSatsToBTC, shortenAddress } from "./utils/helpers";
+import { formatToken, formatBtcReserve, shortenAddress } from "./utils/helpers";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+
+const BTC_TO_SATSTD_RATIO = 100000000;
 
 // Role hash-ek
 const ADMIN_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("ADMIN_ROLE"));
@@ -15,8 +17,8 @@ const PAUSER_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("PAUSER_ROLE
 const OPERATOR_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("OPERATOR_ROLE"));
 
 // Címek
-const CONTRACT_ADDRESS = "0xa86F8D5EE503e52bc8405A54E1C5f163d3D3eF8a";
-const FEED_ADDRESS = "0xD3D2A1EdCBCab8308224C8CaeA8964d399B819D3";
+const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
+const FEED_ADDRESS = process.env.REACT_APP_FEED_ADDRESS;
 
 // ABI
 const TOKEN_ABI = [
@@ -25,7 +27,8 @@ const TOKEN_ABI = [
 "function balanceOf(address) view returns (uint256)",
 "function totalSupply() view returns (uint256)",
 "function mint(address to, uint256 amount) external",
-"function burn(address from, uint256 amount) external",
+"function burn(uint256 amount) external",
+"function burnFrom(address from, uint256 amount) external",
 "function hasRole(bytes32 role, address account) view returns (bool)",
 "function setReserveFeed(address newFeed) external",
 "function pause() external",
@@ -57,8 +60,6 @@ export default function App() {
     const [progress, setProgress] = useState(0);
     const [copied, setCopied] = useState(false);
 
-    // --- DARK MODE MÓDOSÍTÁS ---
-    // State a téma kezelésére, alapértelmezett érték a localStorage-ból vagy rendszerbeállításból
     const [isDarkMode, setIsDarkMode] = useState(() => {
         const savedTheme = localStorage.getItem('theme');
         if (savedTheme) {
@@ -74,7 +75,6 @@ export default function App() {
     const [isPauser, setIsPauser] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
 
-    // UI state for QR modal
     const [showQR, setShowQR] = useState(false);
 
     const getEtherscanLink = (hash) => {
@@ -105,8 +105,6 @@ export default function App() {
         toast.error(errorMessage);
     };
 
-    // --- DARK MODE MÓDOSÍTÁS ---
-    // useEffect, ami a téma változásakor frissíti a HTML-t és a localStorage-t
     useEffect(() => {
         const theme = isDarkMode ? 'dark' : 'light';
         const root = window.document.documentElement;
@@ -159,11 +157,6 @@ export default function App() {
                 }
             });
         }
-        window.ethereum.request({ method: "eth_accounts" }).then((accs) => {
-            if (accs && accs[0]) {
-                processAndAuthorizeAccount(prov, accs[0]);
-            }
-        });
     }, [isTest]);
 
     const isNetworkAllowed = chainId === 11155111;
@@ -234,34 +227,54 @@ export default function App() {
         }
     }
 
-    async function fetchChainData(_provider = provider, addr = account) {
-        try {
-            const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
-            const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
-            const [bal, reserve, supply, paused] = await Promise.all([
-                addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
-                feed.latestAnswer(),
-                token.totalSupply(),
-                token.paused(),
-            ]);
-            setBalance(ethers.utils.formatUnits(bal, 18));
-            setPoReserve(reserve.toString());
-            setTotalSupply(ethers.utils.formatUnits(supply, 18));
-            setIsPaused(paused);
-            const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(reserve, 18)) - parseFloat(ethers.utils.formatUnits(supply, 18)));
-            setMintableMax(maxMint.toString());
-            const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
-            const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
-            if (reserveNum > 0 && supplyNum / reserveNum > 0.9) {
-                setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
-            } else {
-                setReserveWarning("");
-            }
-            setProgress(reserveNum > 0 ? Math.min(100, (supplyNum / reserveNum) * 100) : 0);
-        } catch (e) {
+
+async function fetchChainData(_provider = provider, addr = account) {
+    try {
+        const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
+        const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
+        const [bal, reserve, supply, paused] = await Promise.all([
+            addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
+            feed.latestAnswer(),
+            token.totalSupply(),
+            token.paused(),
+        ]);
+        
+        setBalance(ethers.utils.formatUnits(bal, 18));
+        setPoReserve(reserve.toString());
+        setTotalSupply(ethers.utils.formatUnits(supply, 18));
+        setIsPaused(paused);
+        
+        // 🔧 JAVÍTÁS: Egyszerű, biztonságos számítás
+        // A smart contract így számít: btcReserve / 10^18 * 100M * 10^18
+        // Ez egyszerűsítve: btcReserve * 100M
+        
+        const reserveRaw = ethers.BigNumber.from(reserve.toString());
+        const ratio = ethers.BigNumber.from("100000000"); // 100M
+        const maxMintableRaw = reserveRaw.mul(ratio); // RAW * 100M
+        const currentSupplyRaw = supply;
+        
+        const availableRaw = maxMintableRaw.sub(currentSupplyRaw);
+        const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(availableRaw, 18)));
+        setMintableMax(maxMint.toString());
+        
+        // Progress számítás
+        const maxMintableNum = parseFloat(ethers.utils.formatUnits(maxMintableRaw, 18));
+        const currentSupplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
+        
+        if (maxMintableNum > 0 && currentSupplyNum / maxMintableNum > 0.9) {
+            setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
+        } else {
             setReserveWarning("");
         }
+        
+        const usagePercent = maxMintableNum > 0 ? 
+            Math.min(100, (currentSupplyNum / maxMintableNum) * 100) : 0;
+        setProgress(usagePercent);
+    } catch (e) {
+        console.error("Error fetching chain data:", e);
+        setReserveWarning("");
     }
+}
 
     async function handleMint() {
         if (!isNetworkAllowed && !isTest) return;
@@ -321,7 +334,7 @@ export default function App() {
             setLoading(true);
             const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, signer);
             const amt = ethers.utils.parseUnits(burnAmount, 18);
-            const tx = await token.burn(account, amt);
+            const tx = await token.burn(amt);
             const etherscanLink = getEtherscanLink(tx.hash);
             toastId = toast.loading(
                 <div>
@@ -466,19 +479,16 @@ export default function App() {
             <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center p-4 transition-all duration-300`}>
                 <div className="w-full max-w-md bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-6 space-y-8 transition-all duration-300 relative">
                     
-                    {/* --- DARK MODE MÓDOSÍTÁS: Témaváltó gomb --- */}
                     <button
                         onClick={() => setIsDarkMode(!isDarkMode)}
                         className="absolute top-4 right-4 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
                         aria-label="Toggle theme"
                     >
                         {isDarkMode ? (
-                            // Sun icon
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-1.414 8.486a1 1 0 011.414 0l.707.707a1 1 0 01-1.414 1.414l-.707-.707a1 1 0 010-1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
                             </svg>
                         ) : (
-                            // Moon icon
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                                 <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
                             </svg>
@@ -557,9 +567,16 @@ export default function App() {
                                         >📱</span>
                                     </Tooltip>
                                 </div>
-                                <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">{formatToken(balance)} </p>
+                                
+                                <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">{formatToken(balance)}</p>
+                                
+                                <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 text-xs">
+                                    <p className="text-blue-700 dark:text-blue-300 font-medium">Exchange Rate</p>
+                                    <p className="text-blue-600 dark:text-blue-400">1 BTC = 100,000,000 SATSTD</p>
+                                </div>
+                                
                                 <p className="text-sm text-gray-700 dark:text-gray-200">
-                                    BTC Proof of Reserve: <span className="font-mono">{formatSatsToBTC(poReserve)}</span>
+                                    BTC Proof of Reserve: <span className="font-mono">{formatBtcReserve(poReserve)}</span>
                                 </p>
                                 <p className="text-xs text-gray-500 dark:text-gray-300">
                                     Total supply: {formatToken(totalSupply)}

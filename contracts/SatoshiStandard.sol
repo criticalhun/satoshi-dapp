@@ -13,10 +13,10 @@ contract SatoshiStandard is ERC20, AccessControl, Pausable {
     AggregatorV3Interface public reserveFeed;
 
     // Roles
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");         // DEFAULT_ADMIN
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");        // DEFAULT_ADMIN
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");   // minden, mint admin
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");    // minden, mint admin
 
     // Events
     event Minted(address indexed to, uint256 amount);
@@ -50,22 +50,33 @@ contract SatoshiStandard is ERC20, AccessControl, Pausable {
         emit ReserveFeedChanged(old, newFeed);
     }
 
-    // Operator/admin tud mintelni is, nem csak minter
     function mint(address to, uint256 amount) external whenNotPaused onlyMinterOrOperatorOrAdmin {
-        require(to != address(0), "Invalid address");
-        int256 satoshiReserve = reserveFeed.latestAnswer();
-        require(satoshiReserve >= 0, "Negative reserve");
-        uint256 maxMintable = uint256(satoshiReserve);
-        require(totalSupply() + amount <= maxMintable, "Exceeds BTC reserve");
-        _mint(to, amount);
-        emit Minted(to, amount);
-    }
+    require(to != address(0), "Invalid address");
+    
+    int256 btcReserveRaw = reserveFeed.latestAnswer();
+    require(btcReserveRaw >= 0, "Negative reserve");
+    
+    
+    uint256 BTC_TO_SATSTD_RATIO = 100000000; // 100 millió
+    
+    // Step 1: RAW (18 decimal) -> BTC (normál szám)  
+    uint256 btcReserveInBTC = uint256(btcReserveRaw) / 1e18;
+    
+    // Step 2: BTC * 100M = SATSTD capacity (normál számban)
+    uint256 satsdCapacityInSATSTD = btcReserveInBTC * BTC_TO_SATSTD_RATIO;
+    
+    // Step 3: SATSTD capacity -> wei (18 decimal)
+    uint256 maxMintableInWei = satsdCapacityInSATSTD * 1e18;
+    
+    require(totalSupply() + amount <= maxMintableInWei, "Exceeds BTC reserve");
+    _mint(to, amount);
+    emit Minted(to, amount);
+}
 
-    // Operator/admin tud égetni is, nem csak burner
-    function burn(address from, uint256 amount) external whenNotPaused onlyMinterOrOperatorOrAdmin {
-        require(from != address(0), "Invalid address");
-        _burn(from, amount);
-        emit Burned(from, amount);
+    // Bárki elégetheti a SAJÁT tokenjeit
+    function burn(uint256 amount) external whenNotPaused {
+        _burn(msg.sender, amount);
+        emit Burned(msg.sender, amount);
     }
 
     // Pauser/Operator/Admin tudja pause-olni
@@ -75,7 +86,23 @@ contract SatoshiStandard is ERC20, AccessControl, Pausable {
     function unpause() public onlyPauserOrOperatorOrAdmin {
         _unpause();
     }
-
+    function getDebugInfo() external view returns (
+    int256 rawReserve,
+    uint256 calculatedMax,
+    uint256 currentSupply,
+    uint256 available
+) {
+    int256 btcReserve = reserveFeed.latestAnswer();
+    uint256 BTC_TO_SATSTD_RATIO = 100000000;
+    uint256 maxMintable = uint256(btcReserve) * BTC_TO_SATSTD_RATIO;
+    
+    return (
+        btcReserve,
+        maxMintable,
+        totalSupply(),
+        maxMintable > totalSupply() ? maxMintable - totalSupply() : 0
+    );
+}
     // ----------- Role modifiers ------------
 
     modifier onlyOperatorOrAdmin() {
