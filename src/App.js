@@ -390,19 +390,30 @@ async function fetchChainData(_provider = provider, addr = account) {
         console.log("Should be available:", correctSatsdCapacity - parseFloat(ethers.utils.formatUnits(supply, 18)));
         console.log("=============================");
         
-        const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
-        const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
-        if (reserveNum > 0 && supplyNum / reserveNum > 0.9) {
+        const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18)); // pl. 0.0002
+        const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18)); // pl. 10
+
+        // 1. Számoljuk ki a teljes lehetséges SATSTD mennyiséget a BTC tartalékból
+        const totalCapacity = reserveNum * BTC_TO_SATSTD_RATIO; // pl. 0.0002 * 100_000_000 = 20_000
+
+        // 2. A figyelmeztetést a helyes arány alapján állítjuk be
+        if (totalCapacity > 0 && (supplyNum / totalCapacity) > 0.9) { // pl. 10 / 20000 > 0.9 -> false
             setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
         } else {
             setReserveWarning("");
         }
-        setProgress(reserveNum > 0 ? Math.min(100, (supplyNum / reserveNum) * 100) : 0);
+        
+        // 3. A progress bart is a helyes arány alapján számoljuk
+        setProgress(totalCapacity > 0 ? (supplyNum / totalCapacity) * 100 : 0); // pl. (10 / 20000) * 100 = 0.05%
+
+        // --- JAVÍTÁS VÉGE ---
+
     } catch (e) {
         console.error("Error fetching chain data:", e);
         setReserveWarning("");
     }
 }
+
 
     async function handleMint() {
         if (!isNetworkAllowed && !isTest) return;
