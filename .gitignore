@@ -42,3 +42,5 @@ node_modules
 ignition/deployments/chain-31337
 .env.save
 .env.save.1
+dokumentaciok/
+.env

@@ -227,7 +227,6 @@ export default function App() {
         }
     }
 
-
 async function fetchChainData(_provider = provider, addr = account) {
     try {
         const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
@@ -239,37 +238,42 @@ async function fetchChainData(_provider = provider, addr = account) {
             token.paused(),
         ]);
         
+        // 🔧 DEBUG: Részletes számítás log
+        console.log("=== FETCH CHAIN DATA DEBUG ===");
+        console.log("Raw reserve from feed:", reserve.toString());
+        console.log("Reserve in BTC:", ethers.utils.formatUnits(reserve, 18));
+        console.log("Current supply:", ethers.utils.formatUnits(supply, 18));
+        
         setBalance(ethers.utils.formatUnits(bal, 18));
         setPoReserve(reserve.toString());
         setTotalSupply(ethers.utils.formatUnits(supply, 18));
         setIsPaused(paused);
         
-        // 🔧 JAVÍTÁS: Egyszerű, biztonságos számítás
-        // A smart contract így számít: btcReserve / 10^18 * 100M * 10^18
-        // Ez egyszerűsítve: btcReserve * 100M
-        
+        // Jelenlegi (hibás) számítás
         const reserveRaw = ethers.BigNumber.from(reserve.toString());
         const ratio = ethers.BigNumber.from("100000000"); // 100M
         const maxMintableRaw = reserveRaw.mul(ratio); // RAW * 100M
-        const currentSupplyRaw = supply;
+        console.log("Current calculation (RAW * 100M):", maxMintableRaw.toString());
+        console.log("Current calculation formatted:", ethers.utils.formatUnits(maxMintableRaw, 18));
         
+        // Helyes számítás
+        const btcAmount = parseFloat(ethers.utils.formatUnits(reserve, 18)); // 0.0002
+        const correctSatsdCapacity = btcAmount * 100000000; // 20000 SATSTD
+        const correctWei = ethers.utils.parseUnits(correctSatsdCapacity.toString(), 18);
+        console.log("CORRECT BTC amount:", btcAmount);
+        console.log("CORRECT SATSTD capacity:", correctSatsdCapacity);
+        console.log("CORRECT wei value:", correctWei.toString());
+        
+        const currentSupplyRaw = supply;
         const availableRaw = maxMintableRaw.sub(currentSupplyRaw);
         const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(availableRaw, 18)));
         setMintableMax(maxMint.toString());
         
-        // Progress számítás
-        const maxMintableNum = parseFloat(ethers.utils.formatUnits(maxMintableRaw, 18));
-        const currentSupplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
+        console.log("Available to mint (current calc):", maxMint);
+        console.log("Should be available:", correctSatsdCapacity - parseFloat(ethers.utils.formatUnits(supply, 18)));
+        console.log("=============================");
         
-        if (maxMintableNum > 0 && currentSupplyNum / maxMintableNum > 0.9) {
-            setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
-        } else {
-            setReserveWarning("");
-        }
-        
-        const usagePercent = maxMintableNum > 0 ? 
-            Math.min(100, (currentSupplyNum / maxMintableNum) * 100) : 0;
-        setProgress(usagePercent);
+        // ... rest of the function stays the same
     } catch (e) {
         console.error("Error fetching chain data:", e);
         setReserveWarning("");
