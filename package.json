@@ -6,6 +6,8 @@
     "@chainlink/contracts": "^1.1.0",
     "@craco/craco": "^7.1.0",
     "@openzeppelin/contracts": "^4.9.6",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
     "autoprefixer": "^10.4.19",
     "ethers": "^5.7.2",
     "postcss": "^8.4.38",
@@ -16,6 +18,7 @@
     "react-scripts": "5.0.1",
     "react-toastify": "^10.0.5",
     "tailwindcss": "^3.4.3",
+    "three": "^0.179.1",
     "web-vitals": "^2.1.4"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
+import * as THREE from 'three';
 import NetworkBanner from "./components/NetworkBanner";
 import MintController from "./components/MintController";
 import BurnController from "./components/BurnController";
@@ -40,6 +41,122 @@ const FEED_ABI = [
 ];
 
 const CYPRESS_TEST_ACCOUNT = "0x1234567890abcdef1234567890abcdef12345678";
+
+// Three.js Background Component
+const ThreeBackground = ({ isDarkMode }) => {
+  const mountRef = useRef(null);
+  const sceneRef = useRef(null);
+  const bitcoinsRef = useRef([]);
+
+  useEffect(() => {
+    if (!mountRef.current) return;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 0);
+    mountRef.current.appendChild(renderer.domElement);
+    
+    const createBitcoin = () => {
+      const geometry = new THREE.RingGeometry(0.8, 1, 8);
+      const material = new THREE.MeshBasicMaterial({ 
+        color: isDarkMode ? 0xf7931a : 0xff9500,
+        transparent: true,
+        opacity: 0.6
+      });
+      const bitcoin = new THREE.Mesh(geometry, material);
+      
+      const innerGeometry = new THREE.RingGeometry(0.3, 0.5, 6);
+      const innerMaterial = new THREE.MeshBasicMaterial({ 
+        color: isDarkMode ? 0xffd700 : 0xffa500,
+        transparent: true,
+        opacity: 0.8
+      });
+      const innerRing = new THREE.Mesh(innerGeometry, innerMaterial);
+      bitcoin.add(innerRing);
+      
+      bitcoin.position.x = (Math.random() - 0.5) * 20;
+      bitcoin.position.y = (Math.random() - 0.5) * 20;
+      bitcoin.position.z = (Math.random() - 0.5) * 10;
+      
+      bitcoin.userData = {
+        rotationSpeed: (Math.random() - 0.5) * 0.02,
+        floatSpeed: (Math.random() - 0.5) * 0.01,
+        originalY: bitcoin.position.y
+      };
+      
+      return bitcoin;
+    };
+
+    for (let i = 0; i < 12; i++) {
+      const bitcoin = createBitcoin();
+      scene.add(bitcoin);
+      bitcoinsRef.current.push(bitcoin);
+    }
+    
+    const particleCount = 80;
+    const particleGeometry = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i < particleCount * 3; i++) {
+      particlePositions[i] = (Math.random() - 0.5) * 50;
+    }
+    
+    particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    
+    const particleMaterial = new THREE.PointsMaterial({
+      color: isDarkMode ? 0x00ffff : 0x0088ff,
+      size: 2,
+      transparent: true,
+      opacity: 0.6
+    });
+    
+    const particles = new THREE.Points(particleGeometry, particleMaterial);
+    scene.add(particles);
+
+    camera.position.z = 10;
+    sceneRef.current = { scene, camera, renderer, particles };
+
+    const animate = () => {
+      requestAnimationFrame(animate);
+      
+      bitcoinsRef.current.forEach((bitcoin, index) => {
+        bitcoin.rotation.z += bitcoin.userData.rotationSpeed;
+        bitcoin.position.y = bitcoin.userData.originalY + Math.sin(Date.now() * 0.001 + index) * 2;
+        bitcoin.children[0].rotation.z -= bitcoin.userData.rotationSpeed * 0.5;
+      });
+      
+      if (particles) {
+        particles.rotation.y += 0.001;
+        particles.rotation.x += 0.0005;
+      }
+      
+      renderer.render(scene, camera);
+    };
+    
+    animate();
+
+    const handleResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (mountRef.current && renderer.domElement) {
+        mountRef.current.removeChild(renderer.domElement);
+      }
+      renderer.dispose();
+    };
+  }, [isDarkMode]);
+
+  return <div ref={mountRef} className="fixed inset-0 pointer-events-none z-0" />;
+};
 
 export default function App() {
     const isTest = typeof window.Cypress !== "undefined";
@@ -273,7 +390,14 @@ async function fetchChainData(_provider = provider, addr = account) {
         console.log("Should be available:", correctSatsdCapacity - parseFloat(ethers.utils.formatUnits(supply, 18)));
         console.log("=============================");
         
-        // ... rest of the function stays the same
+        const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
+        const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
+        if (reserveNum > 0 && supplyNum / reserveNum > 0.9) {
+            setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
+        } else {
+            setReserveWarning("");
+        }
+        setProgress(reserveNum > 0 ? Math.min(100, (supplyNum / reserveNum) * 100) : 0);
     } catch (e) {
         console.error("Error fetching chain data:", e);
         setReserveWarning("");
@@ -456,7 +580,24 @@ async function fetchChainData(_provider = provider, addr = account) {
     }
 
     return (
-        <div>
+        <>
+            <ThreeBackground isDarkMode={isDarkMode} />
+            
+            {/* Cyberpunk Grid Background */}
+            <div className="fixed inset-0 pointer-events-none z-0">
+                <div 
+                    className="absolute inset-0 opacity-10 dark:opacity-20"
+                    style={{
+                        backgroundImage: `
+                            linear-gradient(cyan 1px, transparent 1px),
+                            linear-gradient(90deg, cyan 1px, transparent 1px)
+                        `,
+                        backgroundSize: '50px 50px',
+                        animation: 'grid-move 20s linear infinite'
+                    }}
+                />
+            </div>
+
             <ToastContainer
                 position="top-right"
                 autoClose={5000}
@@ -471,184 +612,273 @@ async function fetchChainData(_provider = provider, addr = account) {
             />
 
             {showQR && (
-                <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50" onClick={() => setShowQR(false)}>
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 flex flex-col items-center" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50" onClick={() => setShowQR(false)}>
+                    <div className="bg-gradient-to-br from-gray-900/90 to-black/90 rounded-3xl shadow-2xl p-8 flex flex-col items-center border border-cyan-400/30 backdrop-blur-xl" onClick={e => e.stopPropagation()}>
                         <QRCodeSVG value={account || "0x0"} size={180} />
-                        <div className="mt-3 text-sm text-gray-700 dark:text-gray-300 break-all">{account}</div>
-                        <button onClick={() => setShowQR(false)} className="mt-4 px-3 py-1 rounded bg-blue-600 text-white dark:bg-blue-500">Close</button>
+                        <div className="mt-3 text-sm text-cyan-300 break-all font-mono">{account}</div>
+                        <button 
+                            onClick={() => setShowQR(false)} 
+                            className="mt-4 px-6 py-2 rounded-xl bg-gradient-to-r from-cyan-500/80 to-purple-500/80 text-white font-bold hover:from-cyan-400 hover:to-purple-400 transition-all duration-300 transform hover:scale-105 border border-cyan-400/30 backdrop-blur-sm"
+                        >
+                            Close
+                        </button>
                     </div>
                 </div>
             )}
 
-            <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center p-4 transition-all duration-300`}>
-                <div className="w-full max-w-md bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-6 space-y-8 transition-all duration-300 relative">
-                    
-                    <button
-                        onClick={() => setIsDarkMode(!isDarkMode)}
-                        className="absolute top-4 right-4 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                        aria-label="Toggle theme"
-                    >
-                        {isDarkMode ? (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-1.414 8.486a1 1 0 011.414 0l.707.707a1 1 0 01-1.414 1.414l-.707-.707a1 1 0 010-1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
-                            </svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                            </svg>
-                        )}
-                    </button>
-
-                    <h1 className="text-3xl font-extrabold text-center mb-2 text-gray-800 dark:text-gray-100 pt-8 sm:pt-0">Satoshi Standard dApp</h1>
-                    <NetworkBanner chainId={chainId} />
-
-                    {!isNetworkAllowed && chainId && (
-                        <div className="p-3 rounded-lg bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 text-sm font-semibold flex items-center justify-center">
-                            <span className="animate-pulse mr-2">⚠️</span>
-                            Please switch to Sepolia Testnet (chainId 11155111)
-                        </div>
-                    )}
-
-                    <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mb-2">
+            <div className="min-h-screen relative z-10 flex flex-col items-center p-4 transition-all duration-300">
+                {/* Floating particles effect */}
+                <div className="fixed inset-0 overflow-hidden pointer-events-none">
+                    {[...Array(15)].map((_, i) => (
                         <div
-                            className="h-3 bg-gradient-to-r from-green-400 to-lime-400 dark:from-green-600 dark:to-lime-600 transition-all duration-500"
-                            style={{ width: `${progress}%` }}
-                            role="progressbar"
-                            aria-valuenow={progress}
-                            aria-valuemax={100}
-                            data-tooltip="BTC reserve usage"
+                            key={i}
+                            className="absolute w-2 h-2 bg-cyan-400 rounded-full opacity-30"
+                            style={{
+                                left: `${Math.random() * 100}%`,
+                                top: `${Math.random() * 100}%`,
+                                animation: `float-particle ${3 + Math.random() * 4}s ease-in-out infinite`,
+                                animationDelay: `${Math.random() * 2}s`
+                            }}
                         />
-                    </div>
-                    <div className="text-xs text-gray-400 dark:text-gray-300 text-center mb-2">
-                        Reserve usage: {Math.min(100, Math.round(progress))}%
-                    </div>
+                    ))}
+                </div>
 
-                    {reserveWarning && (
-                        <div className="p-3 rounded bg-orange-100 dark:bg-orange-700 text-orange-700 dark:text-orange-100 text-sm animate-pulse font-semibold">
-                            {reserveWarning}
-                        </div>
-                    )}
-                    
-                    {message.text && (
-                        <div
-                            className={`p-3 rounded text-sm transition-all duration-300 font-semibold ${
-                                message.type === "success"
-                                ? "bg-green-100 dark:bg-green-700 text-green-800 dark:text-green-100 animate-fade-in"
-                                : message.type === "error"
-                                ? "bg-red-100 dark:bg-red-700 text-red-800 dark:text-red-100 animate-shake"
-                                : "bg-blue-100 dark:bg-blue-700 text-blue-800 dark:text-blue-100 animate-fade-in"
-                            }`}
-                        >
-                            {message.text}
-                        </div>
-                    )}
-
-                    {!account ? (
+                <div className="w-full max-w-md relative">
+                    {/* 3D Card with hover effects */}
+                    <div 
+                        className="group bg-black/40 dark:bg-white/10 backdrop-blur-xl shadow-2xl rounded-3xl p-6 space-y-6 transition-all duration-500 transform hover:scale-[1.02] border border-cyan-400/20 hover:border-cyan-400/40 hover:shadow-cyan-400/25 hover:shadow-2xl"
+                        style={{
+                            background: isDarkMode 
+                                ? 'linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(20,20,40,0.9) 100%)'
+                                : 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(200,200,255,0.2) 100%)',
+                        }}
+                    >
+                        
+                        {/* Theme Toggle */}
                         <button
-                            onClick={connectWallet}
-                            disabled={loading || !isNetworkAllowed}
-                            className="w-full py-2 bg-gradient-to-r from-blue-600 to-blue-400 dark:from-blue-800 dark:to-blue-600 text-white rounded-xl font-bold text-lg shadow disabled:opacity-50 flex justify-center items-center"
+                            onClick={() => setIsDarkMode(!isDarkMode)}
+                            className="absolute top-4 right-4 p-3 rounded-full bg-gradient-to-r from-purple-500/20 to-cyan-500/20 text-cyan-400 hover:text-cyan-300 border border-cyan-400/30 hover:border-cyan-400/60 transition-all duration-300 transform hover:scale-110 hover:rotate-180 backdrop-blur-sm hover:shadow-lg hover:shadow-cyan-400/25"
+                            aria-label="Toggle theme"
                         >
-                            {loading && (
-                                <span className="loader mr-2 w-4 h-4 border-2 border-white border-t-blue-400 rounded-full animate-spin"></span>
+                            {isDarkMode ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-1.414 8.486a1 1 0 011.414 0l.707.707a1 1 0 01-1.414 1.414l-.707-.707a1 1 0 010-1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                                </svg>
                             )}
-                            {loading ? "Connecting..." : "Connect Wallet"}
                         </button>
-                    ) : (
-                        <>
-                            <div className="text-center space-y-1">
-                                <div className="flex justify-center items-center space-x-2">
-                                    <p className="font-mono text-xs text-gray-600 dark:text-gray-300 truncate select-all cursor-pointer" onClick={handleCopy}>
-                                        {shortenAddress(account)}
-                                    </p>
-                                    <button onClick={handleCopy} className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-xs font-mono" title="Copy address">
-                                        {copied ? "Copied!" : "Copy"}
-                                    </button>
-                                    <Tooltip text="Show QR code">
-                                        <span
-                                            className="ml-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-300 cursor-pointer"
-                                            onClick={() => setShowQR(true)}
-                                        >📱</span>
-                                    </Tooltip>
-                                </div>
-                                
-                                <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">{formatToken(balance)}</p>
-                                
-                                <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 text-xs">
-                                    <p className="text-blue-700 dark:text-blue-300 font-medium">Exchange Rate</p>
-                                    <p className="text-blue-600 dark:text-blue-400">1 BTC = 100,000,000 SATSTD</p>
-                                </div>
-                                
-                                <p className="text-sm text-gray-700 dark:text-gray-200">
-                                    BTC Proof of Reserve: <span className="font-mono">{formatBtcReserve(poReserve)}</span>
-                                </p>
-                                <p className="text-xs text-gray-500 dark:text-gray-300">
-                                    Total supply: {formatToken(totalSupply)}
-                                </p>
+
+                        {/* Holographic Title */}
+                        <h1 
+                            className="text-3xl font-extrabold text-center mb-4 pt-8 sm:pt-0 bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-pulse"
+                            style={{
+                                textShadow: '0 0 30px rgba(0, 255, 255, 0.5)',
+                                animation: 'holographic 3s ease-in-out infinite'
+                            }}
+                        >
+                            Satoshi Standard dApp
+                        </h1>
+                        
+                        <NetworkBanner chainId={chainId} />
+
+                        {!isNetworkAllowed && chainId && (
+                            <div className="p-4 rounded-xl bg-gradient-to-r from-yellow-500/20 to-orange-500/20 text-yellow-300 dark:text-yellow-200 text-sm font-semibold flex items-center justify-center border border-yellow-400/30 backdrop-blur-sm animate-pulse">
+                                <span className="mr-2 animate-bounce">⚠️</span>
+                                Please switch to Sepolia Testnet (chainId 11155111)
                             </div>
-                            <div className="text-xs text-blue-700 dark:text-blue-400 text-center font-mono mb-2">
-                                Your mintable max: <span>{formatToken(mintableMax)}</span> SATSTD
+                        )}
+
+                        {/* Holographic Progress Bar */}
+                        <div className="space-y-2">
+                            <div className="relative w-full h-4 bg-black/30 dark:bg-white/10 rounded-full overflow-hidden border border-cyan-400/30">
+                                <div
+                                    className="h-4 bg-gradient-to-r from-green-400 via-cyan-400 to-blue-400 transition-all duration-1000 relative"
+                                    style={{ 
+                                        width: `${progress}%`,
+                                        boxShadow: '0 0 20px rgba(0, 255, 255, 0.6)',
+                                        animation: 'pulse-glow 2s ease-in-out infinite'
+                                    }}
+                                >
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse"></div>
+                                </div>
                             </div>
-                            {(isAdmin || isOperator) && (
-                                <div>
-                                    <label className="block text-xs font-bold mb-1 text-gray-800 dark:text-gray-100">
-                                        Reserve Feed Change (admin/operator)
-                                    </label>
-                                    <div className="flex gap-2 mb-2">
-                                        <input
-                                            type="text"
-                                            className="flex-1 p-2 border rounded dark:bg-gray-700 dark:text-white text-xs"
-                                            placeholder="New Feed Address (0x...)"
-                                            value={newFeed}
-                                            onChange={e => setNewFeed(e.target.value)}
-                                        />
-                                        <button
-                                            onClick={handleSetFeed}
-                                            disabled={loading || !newFeed || !ethers.utils.isAddress(newFeed)}
-                                            className="px-3 bg-purple-700 dark:bg-purple-900 text-white rounded disabled:opacity-60 text-xs"
+                            <div className="text-xs text-cyan-400 dark:text-cyan-300 text-center font-mono">
+                                Reserve usage: <span className="font-bold">{Math.min(100, Math.round(progress))}%</span>
+                            </div>
+                        </div>
+
+                        {reserveWarning && (
+                            <div className="p-4 rounded-xl bg-gradient-to-r from-orange-500/20 to-red-500/20 text-orange-300 dark:text-orange-200 text-sm font-semibold border border-orange-400/30 backdrop-blur-sm animate-pulse">
+                                {reserveWarning}
+                            </div>
+                        )}
+                        
+                        {message.text && (
+                            <div
+                                className={`p-4 rounded-xl text-sm transition-all duration-500 font-semibold border backdrop-blur-sm ${
+                                    message.type === "success"
+                                    ? "bg-green-500/20 text-green-300 border-green-400/30 animate-pulse"
+                                    : message.type === "error"
+                                    ? "bg-red-500/20 text-red-300 border-red-400/30 animate-bounce"
+                                    : "bg-blue-500/20 text-blue-300 border-blue-400/30 animate-pulse"
+                                }`}
+                            >
+                                {message.text}
+                            </div>
+                        )}
+
+                        {!account ? (
+                            <button
+                                onClick={connectWallet}
+                                disabled={loading || !isNetworkAllowed}
+                                className="w-full py-4 bg-gradient-to-r from-cyan-500/80 via-purple-500/80 to-pink-500/80 text-white rounded-xl font-bold text-lg shadow-lg disabled:opacity-50 flex justify-center items-center transition-all duration-300 transform hover:scale-105 hover:shadow-2xl hover:shadow-cyan-400/25 border border-cyan-400/30 backdrop-blur-sm relative overflow-hidden group"
+                            >
+                                <div className="absolute inset-0 bg-gradient-to-r from-cyan-400/20 to-purple-400/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+                                <span className="relative z-10">
+                                    {loading && (
+                                        <span className="loader mr-2 w-5 h-5 border-2 border-white border-t-cyan-400 rounded-full animate-spin"></span>
+                                    )}
+                                    {loading ? "Connecting..." : "Connect Wallet"}
+                                </span>
+                            </button>
+                        ) : (
+                            <>
+                                <div className="text-center space-y-4">
+                                    <div className="flex justify-center items-center space-x-3">
+                                        <p className="font-mono text-sm text-cyan-300 dark:text-cyan-400 truncate select-all cursor-pointer hover:text-cyan-200 transition-colors" onClick={handleCopy}>
+                                            {shortenAddress(account)}
+                                        </p>
+                                        <button 
+                                            onClick={handleCopy} 
+                                            className="text-cyan-400 hover:text-cyan-300 text-xs font-mono px-2 py-1 rounded border border-cyan-400/30 hover:border-cyan-400/60 transition-all duration-300 transform hover:scale-105" 
+                                            title="Copy address"
                                         >
-                                            Set Feed
+                                            {copied ? "Copied!" : "Copy"}
                                         </button>
+                                        <Tooltip text="Show QR code">
+                                            <span
+                                                className="text-cyan-400 hover:text-cyan-300 cursor-pointer text-lg transform hover:scale-125 transition-all duration-300"
+                                                onClick={() => setShowQR(true)}
+                                            >📱</span>
+                                        </Tooltip>
+                                    </div>
+                                    
+                                    <div className="bg-gradient-to-r from-black/40 to-gray-900/40 dark:from-white/10 dark:to-gray-800/20 rounded-xl p-4 border border-cyan-400/20 backdrop-blur-sm">
+                                        <p className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+                                            {formatToken(balance)}
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl p-3 text-sm border border-blue-400/30 backdrop-blur-sm">
+                                        <p className="text-blue-300 dark:text-blue-400 font-medium">Exchange Rate</p>
+                                        <p className="text-cyan-400 dark:text-cyan-300 font-mono">1 BTC = 100,000,000 SATSTD</p>
+                                    </div>
+                                    
+                                    <div className="space-y-1">
+                                        <p className="text-sm text-gray-300 dark:text-gray-400">
+                                            BTC Proof of Reserve: <span className="font-mono text-cyan-400">{formatBtcReserve(poReserve)}</span>
+                                        </p>
+                                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                                            Total supply: <span className="text-purple-400">{formatToken(totalSupply)}</span>
+                                        </p>
                                     </div>
                                 </div>
-                            )}
-                            {(isPauser || isAdmin || isOperator) && (
-                                <button
-                                    onClick={handlePause}
-                                    disabled={loading}
-                                    className={`w-full py-2 my-1 rounded font-bold text-xs ${
-                                        isPaused
-                                        ? "bg-orange-600 dark:bg-orange-900 text-white"
-                                        : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white"
-                                    }`}
-                                >
-                                    {loading ? "Processing..." : isPaused ? "Unpause Contract" : "Pause Contract"}
-                                </button>
-                            )}
-                            <div className="space-y-4">
-                                <MintController
-                                    mintAmount={mintAmount}
-                                    setMintAmount={setMintAmount}
-                                    mintableMax={mintableMax}
-                                    loading={loading}
-                                    isNetworkAllowed={isNetworkAllowed}
-                                    isTest={isTest}
-                                    handleMint={handleMint}
-                                />
-                                <BurnController
-                                    burnAmount={burnAmount}
-                                    setBurnAmount={setBurnAmount}
-                                    balance={balance}
-                                    loading={loading}
-                                    isNetworkAllowed={isNetworkAllowed}
-                                    isTest={isTest}
-                                    handleBurn={handleBurn}
-                                />
-                            </div>
-                        </>
-                    )}
+                                
+                                <div className="text-sm text-center font-mono bg-gradient-to-r from-cyan-500/20 to-purple-500/20 rounded-xl p-3 border border-cyan-400/30 backdrop-blur-sm">
+                                    <span className="text-cyan-400">Your mintable max: </span>
+                                    <span className="text-purple-400 font-bold">{formatToken(mintableMax)}</span>
+                                </div>
+
+                                {(isAdmin || isOperator) && (
+                                    <div className="space-y-3">
+                                        <label className="block text-sm font-bold text-cyan-400">
+                                            Reserve Feed Change (admin/operator)
+                                        </label>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                className="flex-1 p-3 border rounded-xl bg-black/20 dark:bg-white/10 text-white border-purple-400/30 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 backdrop-blur-sm transition-all duration-300 text-sm"
+                                                placeholder="New Feed Address (0x...)"
+                                                value={newFeed}
+                                                onChange={e => setNewFeed(e.target.value)}
+                                            />
+                                            <button
+                                                onClick={handleSetFeed}
+                                                disabled={loading || !newFeed || !ethers.utils.isAddress(newFeed)}
+                                                className="px-4 bg-gradient-to-r from-purple-500/80 to-pink-500/80 text-white rounded-xl disabled:opacity-60 text-sm font-bold hover:from-purple-400 hover:to-pink-400 transition-all duration-300 transform hover:scale-105 border border-purple-400/30 backdrop-blur-sm"
+                                            >
+                                                Set Feed
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(isPauser || isAdmin || isOperator) && (
+                                    <button
+                                        onClick={handlePause}
+                                        disabled={loading}
+                                        className={`w-full py-3 rounded-xl font-bold text-sm transition-all duration-300 transform hover:scale-105 border backdrop-blur-sm ${
+                                            isPaused
+                                            ? "bg-gradient-to-r from-orange-500/80 to-red-500/80 text-white border-orange-400/30 hover:from-orange-400 hover:to-red-400"
+                                            : "bg-gradient-to-r from-gray-500/80 to-gray-600/80 text-white border-gray-400/30 hover:from-gray-400 hover:to-gray-500"
+                                        }`}
+                                    >
+                                        {loading ? "Processing..." : isPaused ? "Unpause Contract" : "Pause Contract"}
+                                    </button>
+                                )}
+
+                                <div className="space-y-6">
+                                    <MintController
+                                        mintAmount={mintAmount}
+                                        setMintAmount={setMintAmount}
+                                        mintableMax={mintableMax}
+                                        loading={loading}
+                                        isNetworkAllowed={isNetworkAllowed}
+                                        isTest={isTest}
+                                        handleMint={handleMint}
+                                    />
+                                    <BurnController
+                                        burnAmount={burnAmount}
+                                        setBurnAmount={setBurnAmount}
+                                        balance={balance}
+                                        loading={loading}
+                                        isNetworkAllowed={isNetworkAllowed}
+                                        isTest={isTest}
+                                        handleBurn={handleBurn}
+                                    />
+                                </div>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
-        </div>
+
+            <style jsx>{`
+                @keyframes float-particle {
+                    0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.3; }
+                    50% { transform: translateY(-20px) rotate(180deg); opacity: 0.8; }
+                }
+                
+                @keyframes holographic {
+                    0%, 100% { filter: hue-rotate(0deg); }
+                    25% { filter: hue-rotate(90deg); }
+                    50% { filter: hue-rotate(180deg); }
+                    75% { filter: hue-rotate(270deg); }
+                }
+                
+                @keyframes pulse-glow {
+                    0%, 100% { box-shadow: 0 0 20px rgba(0, 255, 255, 0.6); }
+                    50% { box-shadow: 0 0 40px rgba(0, 255, 255, 0.8), 0 0 60px rgba(0, 255, 255, 0.4); }
+                }
+                
+                @keyframes grid-move {
+                    0% { transform: translate(0, 0); }
+                    100% { transform: translate(50px, 50px); }
+                }
+            `}</style>
+        </>
     );
 }

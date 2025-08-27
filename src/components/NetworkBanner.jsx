@@ -31,18 +31,13 @@ export default function NetworkBanner() {
   if (chainId === null) return null;
 
   if (!ALLOWED_CHAIN_IDS.includes(chainId)) {
-    return (
-      <div className="p-3 bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 rounded text-center text-sm font-semibold">
-        ⚠️ This dApp only works on Sepolia (chainId 11155111) or Localhost (31337).<br />
-        <span>
-          <span className="font-bold">You're on </span>
-          <span className="font-mono">{chainId}</span>.
-        </span>
-        <br />
-        <span>Please switch network in MetaMask.</span>
+      return (
+      <div className="p-3 bg-yellow-100/20 dark:bg-yellow-800/30 text-yellow-300 dark:text-yellow-200 rounded-lg text-center text-sm font-semibold border border-yellow-400/30 backdrop-blur-sm">
+        <span className="animate-pulse mr-2">⚠️</span>
+        Please switch to Sepolia Testnet (chainId 11155111)
       </div>
     );
   }
-
+  
   return null;
-}
+};
