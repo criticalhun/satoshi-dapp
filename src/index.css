@@ -1,28 +1,57 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 @layer utilities {
+  /* New futuristic animations */
   @keyframes float {
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-8px); }
   }
+  
   @keyframes holographic {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
   }
+  
   @keyframes pulse-glow {
     0%, 100% { box-shadow: 0 0 5px #0ff, 0 0 10px #0ff; }
     50% { box-shadow: 0 0 10px #0ff, 0 0 20px #0ff; }
   }
+  
   @keyframes grid-pan {
     0% { background-position: 0 0; }
     100% { background-position: 50px 50px; }
   }
 
+  /* Essential animations that were likely missing */
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Animation utility classes */
   .animate-float {
     animation: float 6s ease-in-out infinite;
   }
+  
   .animate-holographic {
     background: linear-gradient(90deg, #00ffff, #ff00ff, #00ffff);
     background-size: 200% 200%;
@@ -31,9 +60,11 @@
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
+  
   .animate-pulse-glow {
     animation: pulse-glow 2.5s ease-in-out infinite;
   }
+  
   .cyber-grid {
     background-image:
       linear-gradient(rgba(0, 255, 255, 0.2) 1px, transparent 1px),
@@ -41,10 +72,90 @@
     background-size: 50px 50px;
     animation: grid-pan 5s linear infinite;
   }
+  
   .glass-effect {
     background-color: rgba(20, 20, 35, 0.45);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(0, 255, 255, 0.2);
+  }
+
+  /* Essential utility classes that might be missing */
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+  
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+  
+  .animate-shake {
+    animation: shake 0.5s ease-in-out;
+  }
+  
+  .animate-pulse {
+    animation: pulse 2s infinite;
+  }
+
+  /* Loader styles for spinners */
+  .loader {
+    border-style: solid;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  /* Transition utilities */
+  .transition-all {
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+
+  /* Dark mode support */
+  .dark .glass-effect {
+    background-color: rgba(15, 15, 25, 0.6);
+    border: 1px solid rgba(0, 255, 255, 0.15);
+  }
+
+  /* Enhanced focus states */
+  .focus-ring:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+  }
+
+  /* Custom scrollbar for dark theme */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 255, 0.3);
+    border-radius: 3px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 255, 255, 0.5);
+  }
+
+  /* Progress bar styles */
+  .progress-bar {
+    transition: width 0.5s ease-in-out;
+  }
+
+  /* Button hover effects */
+  .btn-glow:hover {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+  }
+
+  /* Text selection styles */
+  ::selection {
+    background-color: rgba(0, 255, 255, 0.2);
+    color: inherit;
   }
 }
