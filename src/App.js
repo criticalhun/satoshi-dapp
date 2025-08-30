@@ -166,103 +166,156 @@ export default function App() {
         localStorage.setItem('theme', theme);
     }, [isDarkMode]);
 
-    // Event handlers - stable references
+    // Event handlers - stable references - DEFENSIVE CODING
     const handleTransferEvent = useCallback((from, to, value, event) => {
-        console.log("Transfer event:", { from, to, value: value.toString(), txHash: event.transactionHash });
-        
-        if (from === ethers.constants.AddressZero || to === ethers.constants.AddressZero) {
-            const formattedAmount = ethers.utils.formatUnits(value, 18);
-            const isMint = from === ethers.constants.AddressZero;
-            const affectedAddress = isMint ? to : from;
-            
-            if (affectedAddress.toLowerCase() === account.toLowerCase()) {
-                toast.success(`${isMint ? 'Minted' : 'Burned'} ${parseFloat(formattedAmount).toFixed(4)} SATSTD detected!`);
-            } else {
-                toast.info(`External ${isMint ? 'mint' : 'burn'} detected: ${parseFloat(formattedAmount).toFixed(4)} SATSTD`);
-            }
-            
-            // Adatok frissítése
-            fetchChainData();
+        // Védekezés undefined értékek ellen
+        if (!from || !to || !value || !event) {
+            console.warn("Transfer event received with missing data");
+            return;
         }
-    }, [account]); // csak account dependency
+
+        try {
+            console.log("Transfer event:", { 
+                from, 
+                to, 
+                value: value.toString(), 
+                txHash: event.transactionHash || "unknown" 
+            });
+            
+            if (from === ethers.constants.AddressZero || to === ethers.constants.AddressZero) {
+                const formattedAmount = ethers.utils.formatUnits(value, 18);
+                const isMint = from === ethers.constants.AddressZero;
+                const affectedAddress = isMint ? to : from;
+                
+                // MINDEN mint/burn esemény megjelenítése, nem csak a sajátok
+                if (affectedAddress.toLowerCase() === account.toLowerCase()) {
+                    toast.success(`You ${isMint ? 'minted' : 'burned'} ${parseFloat(formattedAmount).toFixed(4)} SATSTD`);
+                    fetchChainData(); // Csak saját tranzakciónál frissítjük az adatokat
+                } else {
+                    toast.info(`${isMint ? 'Mint' : 'Burn'}: ${parseFloat(formattedAmount).toFixed(4)} SATSTD (${shortenAddress(affectedAddress)})`);
+                }
+            }
+        } catch (error) {
+            console.error("Error processing Transfer event:", error);
+        }
+    }, [account]);
 
     const handlePausedEvent = useCallback((pausedAccount, event) => {
-        console.log("Contract paused by:", pausedAccount, "txHash:", event.transactionHash);
-        setIsPaused(true);
-        toast.warning("Contract has been paused!");
-    }, []); // nincs dependency
+        try {
+            console.log("Contract paused by:", pausedAccount, "txHash:", event?.transactionHash || "unknown");
+            setIsPaused(true);
+            toast.warning("Contract has been paused!");
+        } catch (error) {
+            console.error("Error processing Paused event:", error);
+        }
+    }, []);
 
     const handleUnpausedEvent = useCallback((unpausedAccount, event) => {
-        console.log("Contract unpaused by:", unpausedAccount, "txHash:", event.transactionHash);
-        setIsPaused(false);
-        toast.success("Contract has been unpaused!");
-    }, []); // nincs dependency
+        try {
+            console.log("Contract unpaused by:", unpausedAccount, "txHash:", event?.transactionHash || "unknown");
+            setIsPaused(false);
+            toast.success("Contract has been unpaused!");
+        } catch (error) {
+            console.error("Error processing Unpaused event:", error);
+        }
+    }, []);
 
     const handleRoleGrantedEvent = useCallback((role, roleAccount, sender, event) => {
-        console.log("Role granted:", { role, account: roleAccount, sender, txHash: event.transactionHash });
-        
-        if (roleAccount.toLowerCase() === account.toLowerCase()) {
-            toast.success("New role granted to your account!");
-            // Szerepek frissítése
-            if (provider && account) {
-                fetchAllRoles(provider, account);
+        try {
+            console.log("Role granted:", { role, account: roleAccount, sender, txHash: event?.transactionHash || "unknown" });
+            
+            if (roleAccount && roleAccount.toLowerCase() === account.toLowerCase()) {
+                toast.success("New role granted to your account!");
+                if (provider && account) {
+                    fetchAllRoles(provider, account);
+                }
             }
+        } catch (error) {
+            console.error("Error processing RoleGranted event:", error);
         }
     }, [account, provider]);
 
     const handleRoleRevokedEvent = useCallback((role, roleAccount, sender, event) => {
-        console.log("Role revoked:", { role, account: roleAccount, sender, txHash: event.transactionHash });
-        
-        if (roleAccount.toLowerCase() === account.toLowerCase()) {
-            toast.error("Role revoked from your account!");
-            // Szerepek frissítése
-            if (provider && account) {
-                fetchAllRoles(provider, account);
+        try {
+            console.log("Role revoked:", { role, account: roleAccount, sender, txHash: event?.transactionHash || "unknown" });
+            
+            if (roleAccount && roleAccount.toLowerCase() === account.toLowerCase()) {
+                toast.error("Role revoked from your account!");
+                if (provider && account) {
+                    fetchAllRoles(provider, account);
+                }
             }
+        } catch (error) {
+            console.error("Error processing RoleRevoked event:", error);
         }
     }, [account, provider]);
 
     const handleReserveFeedChangedEvent = useCallback((oldFeed, newFeed, event) => {
-        console.log("Reserve feed changed:", { oldFeed, newFeed, txHash: event.transactionHash });
-        toast.info("Reserve feed address has been updated!");
-        fetchChainData();
-    }, []); // nincs dependency
+        try {
+            console.log("Reserve feed changed:", { oldFeed, newFeed, txHash: event?.transactionHash || "unknown" });
+            toast.info("Reserve feed address has been updated!");
+            fetchChainData();
+        } catch (error) {
+            console.error("Error processing ReserveFeedChanged event:", error);
+        }
+    }, []);
 
-    // JAVÍTOTT Event listener setup - ref használatával
+    // JAVÍTOTT Event listener setup - contract-alapú listener-ek delay-jel
     useEffect(() => {
         // Ha már van listener vagy nincs elegendő adat, return
         if (!provider || !account || !CONTRACT_ADDRESS || isListeningRef.current) {
             return;
         }
 
-        console.log("Setting up event listeners...");
-        isListeningRef.current = true;
+        async function setupEventListeners() {
+            try {
+                console.log("Setting up event listeners...");
+                isListeningRef.current = true;
 
-        const tokenContract = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, provider);
-        setContract(tokenContract);
+                const tokenContract = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, provider);
+                setContract(tokenContract);
 
-        // Event listener-ek felállítása
-        tokenContract.on("Transfer", handleTransferEvent);
-        tokenContract.on("Paused", handlePausedEvent);
-        tokenContract.on("Unpaused", handleUnpausedEvent);
-        tokenContract.on("RoleGranted", handleRoleGrantedEvent);
-        tokenContract.on("RoleRevoked", handleRoleRevokedEvent);
-        tokenContract.on("ReserveFeedChanged", handleReserveFeedChangedEvent);
+                console.log("Event listeners will start after 2 second delay to avoid old events");
 
-        console.log("Event listeners set up successfully");
+                // 2 másodperces késleltetés a régi események elkerüléséhez
+                setTimeout(() => {
+                    if (isListeningRef.current) {
+                        tokenContract.on("Transfer", handleTransferEvent);
+                        tokenContract.on("Paused", handlePausedEvent);
+                        tokenContract.on("Unpaused", handleUnpausedEvent);
+                        tokenContract.on("RoleGranted", handleRoleGrantedEvent);
+                        tokenContract.on("RoleRevoked", handleRoleRevokedEvent);
+                        tokenContract.on("ReserveFeedChanged", handleReserveFeedChangedEvent);
+
+                        console.log("Event listeners set up successfully with delay");
+                    }
+                }, 2000);
+            } catch (error) {
+                console.error("Error setting up event listeners:", error);
+                isListeningRef.current = false;
+            }
+        }
+
+        setupEventListeners();
 
         return () => {
             console.log("Cleaning up event listeners...");
-            tokenContract.removeAllListeners();
-            isListeningRef.current = false; // ref frissítése
+            if (contract) {
+                contract.removeAllListeners();
+            }
+            isListeningRef.current = false;
             console.log("Event listeners cleaned up");
         };
     }, [
         provider, 
         account, 
         CONTRACT_ADDRESS,
-        // Handler függvények eltávolítva a dependency-kből
-        // mert useCallback-kel stabilak, és csak szükség esetén változnak
+        handleTransferEvent,
+        handlePausedEvent,
+        handleUnpausedEvent,
+        handleRoleGrantedEvent,
+        handleRoleRevokedEvent,
+        handleReserveFeedChangedEvent
     ]);
 
     // Cleanup ref when account/provider changes
