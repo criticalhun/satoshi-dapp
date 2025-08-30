@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react"; // useRef hozzáadva
 import * as THREE from 'three';
 import NetworkBanner from "./components/NetworkBanner";
 import MintController from "./components/MintController";
 import BurnController from "./components/BurnController";
+import EventFeed, { useEventFeedToggle } from "./components/EventFeed";
 import { ethers } from "ethers";
 import { QRCodeSVG } from "qrcode.react";
 import { formatToken, formatBtcReserve, shortenAddress } from "./utils/helpers";
@@ -21,7 +22,7 @@ const OPERATOR_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("OPERATOR_
 const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
 const FEED_ADDRESS = process.env.REACT_APP_FEED_ADDRESS;
 
-// ABI
+// ABI - eseményekkel kibővítve
 const TOKEN_ABI = [
 "function name() view returns (string)",
 "function symbol() view returns (string)",
@@ -34,8 +35,16 @@ const TOKEN_ABI = [
 "function setReserveFeed(address newFeed) external",
 "function pause() external",
 "function unpause() external",
-"function paused() view returns (bool)"
+"function paused() view returns (bool)",
+// Események hozzáadva
+"event Transfer(address indexed from, address indexed to, uint256 value)",
+"event Paused(address account)",
+"event Unpaused(address account)",
+"event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)",
+"event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)",
+"event ReserveFeedChanged(address indexed oldFeed, address indexed newFeed)"
 ];
+
 const FEED_ABI = [
 "function latestAnswer() view returns (int256)",
 ];
@@ -116,6 +125,11 @@ export default function App() {
 
     const [showQR, setShowQR] = useState(false);
 
+    // Event system állapotok - ref használata az infinite loop elkerüléséhez
+    const [contract, setContract] = useState(null);
+    const isListeningRef = useRef(false); // ref használata state helyett
+    const [isEventFeedVisible, toggleEventFeed] = useEventFeedToggle(false);
+
     const getEtherscanLink = (hash) => {
         if (chainId === 11155111) {
             return `https://sepolia.etherscan.io/tx/${hash}`;
@@ -151,6 +165,113 @@ export default function App() {
         root.classList.add(theme);
         localStorage.setItem('theme', theme);
     }, [isDarkMode]);
+
+    // Event handlers - stable references
+    const handleTransferEvent = useCallback((from, to, value, event) => {
+        console.log("Transfer event:", { from, to, value: value.toString(), txHash: event.transactionHash });
+        
+        if (from === ethers.constants.AddressZero || to === ethers.constants.AddressZero) {
+            const formattedAmount = ethers.utils.formatUnits(value, 18);
+            const isMint = from === ethers.constants.AddressZero;
+            const affectedAddress = isMint ? to : from;
+            
+            if (affectedAddress.toLowerCase() === account.toLowerCase()) {
+                toast.success(`${isMint ? 'Minted' : 'Burned'} ${parseFloat(formattedAmount).toFixed(4)} SATSTD detected!`);
+            } else {
+                toast.info(`External ${isMint ? 'mint' : 'burn'} detected: ${parseFloat(formattedAmount).toFixed(4)} SATSTD`);
+            }
+            
+            // Adatok frissítése
+            fetchChainData();
+        }
+    }, [account]); // csak account dependency
+
+    const handlePausedEvent = useCallback((pausedAccount, event) => {
+        console.log("Contract paused by:", pausedAccount, "txHash:", event.transactionHash);
+        setIsPaused(true);
+        toast.warning("Contract has been paused!");
+    }, []); // nincs dependency
+
+    const handleUnpausedEvent = useCallback((unpausedAccount, event) => {
+        console.log("Contract unpaused by:", unpausedAccount, "txHash:", event.transactionHash);
+        setIsPaused(false);
+        toast.success("Contract has been unpaused!");
+    }, []); // nincs dependency
+
+    const handleRoleGrantedEvent = useCallback((role, roleAccount, sender, event) => {
+        console.log("Role granted:", { role, account: roleAccount, sender, txHash: event.transactionHash });
+        
+        if (roleAccount.toLowerCase() === account.toLowerCase()) {
+            toast.success("New role granted to your account!");
+            // Szerepek frissítése
+            if (provider && account) {
+                fetchAllRoles(provider, account);
+            }
+        }
+    }, [account, provider]);
+
+    const handleRoleRevokedEvent = useCallback((role, roleAccount, sender, event) => {
+        console.log("Role revoked:", { role, account: roleAccount, sender, txHash: event.transactionHash });
+        
+        if (roleAccount.toLowerCase() === account.toLowerCase()) {
+            toast.error("Role revoked from your account!");
+            // Szerepek frissítése
+            if (provider && account) {
+                fetchAllRoles(provider, account);
+            }
+        }
+    }, [account, provider]);
+
+    const handleReserveFeedChangedEvent = useCallback((oldFeed, newFeed, event) => {
+        console.log("Reserve feed changed:", { oldFeed, newFeed, txHash: event.transactionHash });
+        toast.info("Reserve feed address has been updated!");
+        fetchChainData();
+    }, []); // nincs dependency
+
+    // JAVÍTOTT Event listener setup - ref használatával
+    useEffect(() => {
+        // Ha már van listener vagy nincs elegendő adat, return
+        if (!provider || !account || !CONTRACT_ADDRESS || isListeningRef.current) {
+            return;
+        }
+
+        console.log("Setting up event listeners...");
+        isListeningRef.current = true;
+
+        const tokenContract = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, provider);
+        setContract(tokenContract);
+
+        // Event listener-ek felállítása
+        tokenContract.on("Transfer", handleTransferEvent);
+        tokenContract.on("Paused", handlePausedEvent);
+        tokenContract.on("Unpaused", handleUnpausedEvent);
+        tokenContract.on("RoleGranted", handleRoleGrantedEvent);
+        tokenContract.on("RoleRevoked", handleRoleRevokedEvent);
+        tokenContract.on("ReserveFeedChanged", handleReserveFeedChangedEvent);
+
+        console.log("Event listeners set up successfully");
+
+        return () => {
+            console.log("Cleaning up event listeners...");
+            tokenContract.removeAllListeners();
+            isListeningRef.current = false; // ref frissítése
+            console.log("Event listeners cleaned up");
+        };
+    }, [
+        provider, 
+        account, 
+        CONTRACT_ADDRESS,
+        // Handler függvények eltávolítva a dependency-kből
+        // mert useCallback-kel stabilak, és csak szükség esetén változnak
+    ]);
+
+    // Cleanup ref when account/provider changes
+    useEffect(() => {
+        if (!provider || !account) {
+            isListeningRef.current = false;
+            setContract(null);
+        }
+    }, [provider, account]);
 
     const processAndAuthorizeAccount = async (prov, addr) => {
         const roles = await fetchAllRoles(prov, addr);
@@ -266,72 +387,51 @@ export default function App() {
         }
     }
 
-async function fetchChainData(_provider = provider, addr = account) {
-    try {
-        const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
-        const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
-        const [bal, reserve, supply, paused] = await Promise.all([
-            addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
-            feed.latestAnswer(),
-            token.totalSupply(),
-            token.paused(),
-        ]);
-        
-        // 🔧 DEBUG: Részletes számítás log
-        console.log("=== FETCH CHAIN DATA DEBUG ===");
-        console.log("Raw reserve from feed:", reserve.toString());
-        console.log("Reserve in BTC:", ethers.utils.formatUnits(reserve, 18));
-        console.log("Current supply:", ethers.utils.formatUnits(supply, 18));
-        
-        setBalance(ethers.utils.formatUnits(bal, 18));
-        setPoReserve(reserve.toString());
-        setTotalSupply(ethers.utils.formatUnits(supply, 18));
-        setIsPaused(paused);
-        
-        // Jelenlegi (hibás) számítás
-        const reserveRaw = ethers.BigNumber.from(reserve.toString());
-        const ratio = ethers.BigNumber.from("100000000"); // 100M
-        const maxMintableRaw = reserveRaw.mul(ratio); // RAW * 100M
-        console.log("Current calculation (RAW * 100M):", maxMintableRaw.toString());
-        console.log("Current calculation formatted:", ethers.utils.formatUnits(maxMintableRaw, 18));
-        
-        // Helyes számítás
-        const btcAmount = parseFloat(ethers.utils.formatUnits(reserve, 18)); // 0.0002
-        const correctSatsdCapacity = btcAmount * 100000000; // 20000 SATSTD
-        const correctWei = ethers.utils.parseUnits(correctSatsdCapacity.toString(), 18);
-        console.log("CORRECT BTC amount:", btcAmount);
-        console.log("CORRECT SATSTD capacity:", correctSatsdCapacity);
-        console.log("CORRECT wei value:", correctWei.toString());
-        
-        const currentSupplyRaw = supply;
-        const availableRaw = maxMintableRaw.sub(currentSupplyRaw);
-        const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(availableRaw, 18)));
-        setMintableMax(maxMint.toString());
-        
-        console.log("Available to mint (current calc):", maxMint);
-        console.log("Should be available:", correctSatsdCapacity - parseFloat(ethers.utils.formatUnits(supply, 18)));
-        console.log("=============================");
-         const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18)); // pl. 0.0002
-        const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18)); // pl. 10
+    async function fetchChainData(_provider = provider, addr = account) {
+        try {
+            const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
+            const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
+            const [bal, reserve, supply, paused] = await Promise.all([
+                addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
+                feed.latestAnswer(),
+                token.totalSupply(),
+                token.paused(),
+            ]);
+            
+            setBalance(ethers.utils.formatUnits(bal, 18));
+            setPoReserve(reserve.toString());
+            setTotalSupply(ethers.utils.formatUnits(supply, 18));
+            setIsPaused(paused);
+            
+            // Helyes számítás
+            const reserveRaw = ethers.BigNumber.from(reserve.toString());
+            const ratio = ethers.BigNumber.from("100000000"); // 100M
+            const maxMintableRaw = reserveRaw.mul(ratio);
+            
+            const currentSupplyRaw = supply;
+            const availableRaw = maxMintableRaw.sub(currentSupplyRaw);
+            const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(availableRaw, 18)));
+            setMintableMax(maxMint.toString());
+            
+            const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
+            const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
 
-        // 1. Számoljuk ki a teljes lehetséges SATSTD mennyiséget a BTC tartalékból
-        const totalCapacity = reserveNum * BTC_TO_SATSTD_RATIO; // pl. 0.0002 * 100_000_000 = 20_000
+            // Teljes lehetséges SATSTD mennyiség a BTC tartalékból
+            const totalCapacity = reserveNum * BTC_TO_SATSTD_RATIO;
 
-        // 2. A figyelmeztetést a helyes arány alapján állítjuk be
-        if (totalCapacity > 0 && (supplyNum / totalCapacity) > 0.9) { // pl. 10 / 20000 > 0.9 -> false
-            setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
-        } else {
+            // Figyelmeztetés és progress a helyes arány alapján
+            if (totalCapacity > 0 && (supplyNum / totalCapacity) > 0.9) {
+                setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
+            } else {
+                setReserveWarning("");
+            }
+            
+            setProgress(totalCapacity > 0 ? (supplyNum / totalCapacity) * 100 : 0);
+        } catch (e) {
+            console.error("Error fetching chain data:", e);
             setReserveWarning("");
         }
-        
-        // 3. A progress bart is a helyes arány alapján számoljuk
-        setProgress(totalCapacity > 0 ? (supplyNum / totalCapacity) * 100 : 0); // pl. (10 / 20000) * 100 = 0.05%
-        // ... rest of the function stays the same
-    } catch (e) {
-        console.error("Error fetching chain data:", e);
-        setReserveWarning("");
     }
-}
 
     async function handleMint() {
         if (!isNetworkAllowed && !isTest) return;
@@ -359,13 +459,13 @@ async function fetchChainData(_provider = provider, addr = account) {
                 </div>
             );
             await tx.wait();
+
             toast.update(toastId, {
                 render: `Successfully minted ${mintAmount} SATSTD!`,
                 type: 'success',
                 isLoading: false,
                 autoClose: 5000,
             });
-            await fetchChainData();
             setMintAmount("");
         } catch (e) {
             if (toastId) toast.dismiss(toastId);
@@ -401,13 +501,13 @@ async function fetchChainData(_provider = provider, addr = account) {
                 </div>
             );
             await tx.wait();
+
             toast.update(toastId, {
                 render: `Successfully burned ${burnAmount} SATSTD!`,
                 type: 'success',
                 isLoading: false,
                 autoClose: 5000,
             });
-            await fetchChainData();
             setBurnAmount("");
         } catch (e) {
             if (toastId) toast.dismiss(toastId);
@@ -475,13 +575,13 @@ async function fetchChainData(_provider = provider, addr = account) {
                 </div>
             );
             await tx.wait();
+
             toast.update(toastId, {
                 render: `Contract has been ${isPaused ? "unpaused" : "paused"}.`,
                 type: 'success',
                 isLoading: false,
                 autoClose: 5000,
             });
-            setIsPaused(!isPaused);
         } catch (e) {
             if (toastId) toast.dismiss(toastId);
             handleTxError(e);
@@ -539,23 +639,36 @@ async function fetchChainData(_provider = provider, addr = account) {
             <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center p-4 transition-all duration-300 relative z-10`}>
                 <div className="w-full max-w-md bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-6 space-y-8 transition-all duration-300 relative">
                     
-                    <button
-                        onClick={() => setIsDarkMode(!isDarkMode)}
-                        className="absolute top-4 right-4 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                        aria-label="Toggle theme"
-                    >
-                        {isDarkMode ? (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-1.414 8.486a1 1 0 011.414 0l.707.707a1 1 0 01-1.414 1.414l-.707-.707a1 1 0 010-1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
-                            </svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                            </svg>
-                        )}
-                    </button>
+                    {/* Event Feed Toggle + Dark Mode Toggle */}
+                    <div className="absolute top-4 right-4 flex space-x-2">
+                        {/* Event Feed Toggle */}
+                        <button
+                            onClick={toggleEventFeed}
+                            className={`p-2 rounded-full transition-colors ${
+                                isEventFeedVisible 
+                                ? 'bg-green-200 dark:bg-green-700 text-green-800 dark:text-green-200' 
+                                : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                            }`}
+                            aria-label="Toggle event feed"
+                            title="Toggle live event monitor"
+                        >
+                            📡
+                        </button>
+                        
+                        {/* Dark Mode Toggle */}
+                        <button
+                            onClick={() => setIsDarkMode(!isDarkMode)}
+                            className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors text-xl"
+                            aria-label="Toggle theme"
+                            title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+                        >
+                            {isDarkMode ? '☀️' : '🌙'}
+                        </button>
+                    </div>
 
-                    <h1 className="text-3xl font-extrabold text-center mb-2 text-gray-800 dark:text-gray-100 pt-8 sm:pt-0">Satoshi Standard dApp</h1>
+                    <h1 className="text-3xl font-extrabold text-center mb-2 text-gray-800 dark:text-gray-100 pt-8 sm:pt-0">
+                        Satoshi Standard dApp
+                    </h1>
                     <NetworkBanner chainId={chainId} />
 
                     {!isNetworkAllowed && chainId && (
@@ -705,6 +818,13 @@ async function fetchChainData(_provider = provider, addr = account) {
                     )}
                 </div>
             </div>
+            
+            {/* Event Feed komponens */}
+            <EventFeed 
+                contract={contract} 
+                isVisible={isEventFeedVisible && !!contract}
+                maxEvents={15}
+            />
         </div>
     </>
 );

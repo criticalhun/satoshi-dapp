@@ -1,0 +1,151 @@
+/* src/styles/animations.css */
+
+/* Fade in animáció az új eseményekhez */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Shake animáció hibaüzenetekhez */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+  20%, 40%, 60%, 80% { transform: translateX(10px); }
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Pulse animáció a figyelmeztetésekhez */
+@keyframes pulse-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pulse-warning {
+  animation: pulse-warning 2s ease-in-out infinite;
+}
+
+/* Loading spinner */
+.loader {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Glow effect az élő státuszhoz */
+@keyframes glow-green {
+  0%, 100% { 
+    box-shadow: 0 0 5px rgba(34, 197, 94, 0.4);
+  }
+  50% { 
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.8);
+  }
+}
+
+.animate-glow-green {
+  animation: glow-green 2s ease-in-out infinite;
+}
+
+/* Slide-in animáció az event feed-hez */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+/* Hover effect a gomboknál */
+.hover-scale {
+  transition: transform 0.2s ease-in-out;
+}
+
+.hover-scale:hover {
+  transform: scale(1.05);
+}
+
+/* Dark mode transition */
+.theme-transition {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Progress bar animáció */
+@keyframes progressPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.progress-animate {
+  animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+/* Bitcoin szimbólum animáció a háttérben */
+@keyframes bitcoinFloat {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  33% { transform: translateY(-10px) rotate(120deg); }
+  66% { transform: translateY(5px) rotate(240deg); }
+}
+
+.bitcoin-float {
+  animation: bitcoinFloat 6s ease-in-out infinite;
+}
+
+/* Status indicator animáció */
+@keyframes statusBlink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
+}
+
+.status-blink {
+  animation: statusBlink 1s linear infinite;
+}
+
+/* Toast notification customization */
+.Toastify__toast--success {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+}
+
+.Toastify__toast--error {
+  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+}
+
+.Toastify__toast--warning {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+}
+
+.Toastify__toast--info {
+  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .animate-fade-in {
+    animation-duration: 0.2s;
+  }
+  
+  .hover-scale:hover {
+    transform: scale(1.02);
+  }
+}
