@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react"; // useRef hozzáadva
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import * as THREE from 'three';
 import NetworkBanner from "./components/NetworkBanner";
 import MintController from "./components/MintController";
@@ -54,34 +54,13 @@ const CYPRESS_TEST_ACCOUNT = "0x1234567890abcdef1234567890abcdef12345678";
 const ThreeBackground = ({ isDarkMode }) => {
   return (
     <div className="fixed inset-0 pointer-events-none z-0">
-      {/* Bitcoin szimbólumok CSS-sel */}
-      <div className="absolute inset-0 overflow-hidden">
-        {[...Array(5)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute animate-spin"
-            style={{
-              left: `${20 + i * 20}%`,
-              top: `${20 + i * 15}%`,
-              fontSize: '60px',
-              opacity: 0.1,
-              color: isDarkMode ? '#f7931a' : '#ff9500',
-              animationDuration: `${5 + i * 2}s`,
-              animationDelay: `${i * 0.5}s`
-            }}
-          >
-            ₿
-          </div>
-        ))}
-      </div>
-      
       {/* Gradiens háttér */}
-      <div 
+      <div
         className="absolute inset-0"
         style={{
-          background: isDarkMode 
-            ? 'radial-gradient(circle at 20% 20%, rgba(247,147,26,0.1) 0%, transparent 50%)'
-            : 'radial-gradient(circle at 80% 80%, rgba(255,149,0,0.1) 0%, transparent 50%)',
+          background: isDarkMode
+            ? 'radial-gradient(circle at 20% 20%, rgba(247,147,26,0.08) 0%, transparent 50%)'
+            : 'radial-gradient(circle at 80% 80%, rgba(255,149,0,0.12) 0%, transparent 50%)',
           animation: 'pulse 4s ease-in-out infinite'
         }}
       />
@@ -166,6 +145,53 @@ export default function App() {
         localStorage.setItem('theme', theme);
     }, [isDarkMode]);
 
+    // fetchChainData ELŐRE HOZVA - ez kell elsőnek!
+    const fetchChainData = useCallback(async (_provider = provider, addr = account) => {
+        try {
+            const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
+            const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
+            const [bal, reserve, supply, paused] = await Promise.all([
+                addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
+                feed.latestAnswer(),
+                token.totalSupply(),
+                token.paused(),
+            ]);
+
+            setBalance(ethers.utils.formatUnits(bal, 18));
+            setPoReserve(reserve.toString());
+            setTotalSupply(ethers.utils.formatUnits(supply, 18));
+            setIsPaused(paused);
+
+            // Helyes számítás
+            const reserveRaw = ethers.BigNumber.from(reserve.toString());
+            const ratio = ethers.BigNumber.from("100000000"); // 100M
+            const maxMintableRaw = reserveRaw.mul(ratio);
+
+            const currentSupplyRaw = supply;
+            const availableRaw = maxMintableRaw.sub(currentSupplyRaw);
+            const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(availableRaw, 18)));
+            setMintableMax(maxMint.toString());
+
+            const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
+            const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
+
+            // Teljes lehetséges SATSTD mennyiség a BTC tartalékból
+            const totalCapacity = reserveNum * BTC_TO_SATSTD_RATIO;
+
+            // Figyelmeztetés és progress a helyes arány alapján
+            if (totalCapacity > 0 && (supplyNum / totalCapacity) > 0.9) {
+                setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
+            } else {
+                setReserveWarning("");
+            }
+
+            setProgress(totalCapacity > 0 ? (supplyNum / totalCapacity) * 100 : 0);
+        } catch (e) {
+            console.error("Error fetching chain data:", e);
+            setReserveWarning("");
+        }
+    }, [provider, account]);
+
     // Event handlers - stable references - DEFENSIVE CODING
     const handleTransferEvent = useCallback((from, to, value, event) => {
         // Védekezés undefined értékek ellen
@@ -175,18 +201,18 @@ export default function App() {
         }
 
         try {
-            console.log("Transfer event:", { 
-                from, 
-                to, 
-                value: value.toString(), 
-                txHash: event.transactionHash || "unknown" 
+            console.log("Transfer event:", {
+                from,
+                to,
+                value: value.toString(),
+                txHash: event.transactionHash || "unknown"
             });
-            
+
             if (from === ethers.constants.AddressZero || to === ethers.constants.AddressZero) {
                 const formattedAmount = ethers.utils.formatUnits(value, 18);
                 const isMint = from === ethers.constants.AddressZero;
                 const affectedAddress = isMint ? to : from;
-                
+
                 // MINDEN mint/burn esemény megjelenítése, nem csak a sajátok
                 if (affectedAddress.toLowerCase() === account.toLowerCase()) {
                     toast.success(`You ${isMint ? 'minted' : 'burned'} ${parseFloat(formattedAmount).toFixed(4)} SATSTD`);
@@ -198,32 +224,32 @@ export default function App() {
         } catch (error) {
             console.error("Error processing Transfer event:", error);
         }
-    }, [account]);
+    }, [account, fetchChainData]);
 
     const handlePausedEvent = useCallback((pausedAccount, event) => {
         try {
             console.log("Contract paused by:", pausedAccount, "txHash:", event?.transactionHash || "unknown");
-            setIsPaused(true);
+            setIsPaused(true); // CSAK közvetlen state frissítés
             toast.warning("Contract has been paused!");
         } catch (error) {
             console.error("Error processing Paused event:", error);
         }
-    }, []);
+    }, []); // nincs dependency
 
     const handleUnpausedEvent = useCallback((unpausedAccount, event) => {
         try {
             console.log("Contract unpaused by:", unpausedAccount, "txHash:", event?.transactionHash || "unknown");
-            setIsPaused(false);
+            setIsPaused(false); // CSAK közvetlen state frissítés
             toast.success("Contract has been unpaused!");
         } catch (error) {
             console.error("Error processing Unpaused event:", error);
         }
-    }, []);
+    }, []); // nincs dependency
 
     const handleRoleGrantedEvent = useCallback((role, roleAccount, sender, event) => {
         try {
             console.log("Role granted:", { role, account: roleAccount, sender, txHash: event?.transactionHash || "unknown" });
-            
+
             if (roleAccount && roleAccount.toLowerCase() === account.toLowerCase()) {
                 toast.success("New role granted to your account!");
                 if (provider && account) {
@@ -238,7 +264,7 @@ export default function App() {
     const handleRoleRevokedEvent = useCallback((role, roleAccount, sender, event) => {
         try {
             console.log("Role revoked:", { role, account: roleAccount, sender, txHash: event?.transactionHash || "unknown" });
-            
+
             if (roleAccount && roleAccount.toLowerCase() === account.toLowerCase()) {
                 toast.error("Role revoked from your account!");
                 if (provider && account) {
@@ -254,11 +280,11 @@ export default function App() {
         try {
             console.log("Reserve feed changed:", { oldFeed, newFeed, txHash: event?.transactionHash || "unknown" });
             toast.info("Reserve feed address has been updated!");
-            fetchChainData();
+            fetchChainData(); // Minden felhasználónál frissítjük az állapotot
         } catch (error) {
             console.error("Error processing ReserveFeedChanged event:", error);
         }
-    }, []);
+    }, [fetchChainData]);
 
     // JAVÍTOTT Event listener setup - contract-alapú listener-ek delay-jel
     useEffect(() => {
@@ -307,8 +333,8 @@ export default function App() {
             console.log("Event listeners cleaned up");
         };
     }, [
-        provider, 
-        account, 
+        provider,
+        account,
         CONTRACT_ADDRESS,
         handleTransferEvent,
         handlePausedEvent,
@@ -440,52 +466,6 @@ export default function App() {
         }
     }
 
-    async function fetchChainData(_provider = provider, addr = account) {
-        try {
-            const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, _provider);
-            const feed = new ethers.Contract(FEED_ADDRESS, FEED_ABI, _provider);
-            const [bal, reserve, supply, paused] = await Promise.all([
-                addr ? token.balanceOf(addr) : ethers.BigNumber.from(0),
-                feed.latestAnswer(),
-                token.totalSupply(),
-                token.paused(),
-            ]);
-            
-            setBalance(ethers.utils.formatUnits(bal, 18));
-            setPoReserve(reserve.toString());
-            setTotalSupply(ethers.utils.formatUnits(supply, 18));
-            setIsPaused(paused);
-            
-            // Helyes számítás
-            const reserveRaw = ethers.BigNumber.from(reserve.toString());
-            const ratio = ethers.BigNumber.from("100000000"); // 100M
-            const maxMintableRaw = reserveRaw.mul(ratio);
-            
-            const currentSupplyRaw = supply;
-            const availableRaw = maxMintableRaw.sub(currentSupplyRaw);
-            const maxMint = Math.max(0, parseFloat(ethers.utils.formatUnits(availableRaw, 18)));
-            setMintableMax(maxMint.toString());
-            
-            const reserveNum = parseFloat(ethers.utils.formatUnits(reserve, 18));
-            const supplyNum = parseFloat(ethers.utils.formatUnits(supply, 18));
-
-            // Teljes lehetséges SATSTD mennyiség a BTC tartalékból
-            const totalCapacity = reserveNum * BTC_TO_SATSTD_RATIO;
-
-            // Figyelmeztetés és progress a helyes arány alapján
-            if (totalCapacity > 0 && (supplyNum / totalCapacity) > 0.9) {
-                setReserveWarning("Warning: Reserve is almost depleted. Only a small amount of SATSTD can be minted!");
-            } else {
-                setReserveWarning("");
-            }
-            
-            setProgress(totalCapacity > 0 ? (supplyNum / totalCapacity) * 100 : 0);
-        } catch (e) {
-            console.error("Error fetching chain data:", e);
-            setReserveWarning("");
-        }
-    }
-
     async function handleMint() {
         if (!isNetworkAllowed && !isTest) return;
         const amount = parseFloat(mintAmount || "0");
@@ -608,21 +588,20 @@ export default function App() {
         }
     }
 
-    async function handlePause() {
+     async function handlePause() {
         if (!isPauser && !isOperator && !isAdmin) {
             toast.error("Not authorized.");
             return;
         }
         let toastId;
-        const actionText = isPaused ? "Unpausing" : "Pausing";
         try {
             setLoading(true);
             const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, signer);
-            const tx = await (isPaused ? token.unpause() : token.pause());
+            const tx = await token.pause();
             const etherscanLink = getEtherscanLink(tx.hash);
             toastId = toast.loading(
                 <div>
-                    {actionText} transaction submitted...
+                    Pausing transaction submitted...
                     <br/>
                     <a href={etherscanLink} target="_blank" rel="noopener noreferrer" className="text-white font-bold underline">View on Etherscan</a>
                 </div>
@@ -630,7 +609,41 @@ export default function App() {
             await tx.wait();
 
             toast.update(toastId, {
-                render: `Contract has been ${isPaused ? "unpaused" : "paused"}.`,
+                render: "Contract has been paused.",
+                type: 'success',
+                isLoading: false,
+                autoClose: 5000,
+            });
+        } catch (e) {
+            if (toastId) toast.dismiss(toastId);
+            handleTxError(e);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleUnpause() {
+        if (!isPauser && !isOperator && !isAdmin) {
+            toast.error("Not authorized.");
+            return;
+        }
+        let toastId;
+        try {
+            setLoading(true);
+            const token = new ethers.Contract(CONTRACT_ADDRESS, TOKEN_ABI, signer);
+            const tx = await token.unpause();
+            const etherscanLink = getEtherscanLink(tx.hash);
+            toastId = toast.loading(
+                <div>
+                    Unpausing transaction submitted...
+                    <br/>
+                    <a href={etherscanLink} target="_blank" rel="noopener noreferrer" className="text-white font-bold underline">View on Etherscan</a>
+                </div>
+            );
+            await tx.wait();
+
+            toast.update(toastId, {
+                render: "Contract has been unpaused.",
                 type: 'success',
                 isLoading: false,
                 autoClose: 5000,
@@ -660,11 +673,53 @@ export default function App() {
             </span>
         );
     }
-    
+
  return (
     <>
+        <style jsx>{`
+          @keyframes titleEntrance {
+            0% {
+              opacity: 0;
+              transform: translateY(-10px);
+              letter-spacing: 2px;
+            }
+            50% {
+              letter-spacing: 1px;
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0);
+              letter-spacing: normal;
+            }
+          }
+
+          @keyframes gradientShift {
+            0% {
+              background-size: 200% 200%;
+              background-position: 0% 50%;
+            }
+            50% {
+              background-size: 200% 200%;
+              background-position: 100% 50%;
+            }
+            100% {
+              background-size: 200% 200%;
+              background-position: 0% 50%;
+            }
+          }
+
+          .animate-title-entrance {
+            animation: titleEntrance 1.2s ease-out forwards;
+          }
+
+          .animate-gradient-shift {
+            background-size: 200% 200%;
+            animation: gradientShift 3s ease-in-out infinite;
+          }
+        `}</style>
+
         <ThreeBackground isDarkMode={isDarkMode} />
-        
+
         <div>
             <ToastContainer
                 position="top-right"
@@ -689,17 +744,17 @@ export default function App() {
                 </div>
             )}
 
-            <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center p-4 transition-all duration-300 relative z-10`}>
-                <div className="w-full max-w-md bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-6 space-y-8 transition-all duration-300 relative">
-                    
+            <div className={`min-h-screen bg-gray-50/80 dark:bg-gray-900/80 flex flex-col items-center p-4 transition-all duration-300 relative z-10`}>
+                <div className="w-full max-w-md bg-white dark:bg-gray-800 shadow-lg rounded-2xl p-6 space-y-6 transition-all duration-300 relative">
+
                     {/* Event Feed Toggle + Dark Mode Toggle */}
                     <div className="absolute top-4 right-4 flex space-x-2">
                         {/* Event Feed Toggle */}
                         <button
                             onClick={toggleEventFeed}
                             className={`p-2 rounded-full transition-colors ${
-                                isEventFeedVisible 
-                                ? 'bg-green-200 dark:bg-green-700 text-green-800 dark:text-green-200' 
+                                isEventFeedVisible
+                                ? 'bg-green-200 dark:bg-green-700 text-green-800 dark:text-green-200'
                                 : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
                             }`}
                             aria-label="Toggle event feed"
@@ -707,7 +762,7 @@ export default function App() {
                         >
                             📡
                         </button>
-                        
+
                         {/* Dark Mode Toggle */}
                         <button
                             onClick={() => setIsDarkMode(!isDarkMode)}
@@ -719,10 +774,22 @@ export default function App() {
                         </button>
                     </div>
 
-                    <h1 className="text-3xl font-extrabold text-center mb-2 text-gray-800 dark:text-gray-100 pt-8 sm:pt-0">
-                        Satoshi Standard dApp
-                    </h1>
+                    {/* --- MÓDOSÍTOTT RÉSZ KEZDETE --- */}
+
+                    {/* Címsor - lejjebb pozicionálva */}
+                    <div className="text-center mt-16">
+                        <br/> {/* Hozzáadott sortörés */}
+                        <h1 className="text-3xl font-extrabold text-gray-800 dark:text-gray-100 animate-title-entrance">
+                            <span className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-800 dark:from-blue-400 dark:via-purple-400 dark:to-blue-600 bg-clip-text text-transparent animate-gradient-shift">
+                                Satoshi Standard dApp
+                            </span>
+                        </h1>
+                    </div>
+
                     <NetworkBanner chainId={chainId} />
+
+                    {/* --- MÓDOSÍTOTT RÉSZ VÉGE --- */}
+
 
                     {!isNetworkAllowed && chainId && (
                         <div className="p-3 rounded-lg bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-100 text-sm font-semibold flex items-center justify-center">
@@ -731,9 +798,9 @@ export default function App() {
                         </div>
                     )}
 
-                    <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mb-2">
+                    <div className="w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden mb-2">
                         <div
-                            className="h-3 bg-gradient-to-r from-green-400 to-lime-400 dark:from-green-600 dark:to-lime-600 transition-all duration-500"
+                            className="h-4 bg-gradient-to-r from-green-400 to-lime-400 dark:from-green-600 dark:to-lime-600 transition-all duration-500"
                             style={{ width: `${progress}%` }}
                             role="progressbar"
                             aria-valuenow={progress}
@@ -750,7 +817,7 @@ export default function App() {
                             {reserveWarning}
                         </div>
                     )}
-                    
+
                     {message.text && (
                         <div
                             className={`p-3 rounded text-sm transition-all duration-300 font-semibold ${
@@ -779,6 +846,18 @@ export default function App() {
                     ) : (
                         <>
                             <div className="text-center space-y-1">
+                                {/* Szerepek megjelenítése - felül */}
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        Roles: {[
+                                            isAdmin && "Admin",
+                                            isOperator && "Operator",
+                                            isMinter && "Minter",
+                                            isPauser && "Pauser"
+                                        ].filter(Boolean).join(", ") || "None"}
+                                    </p>
+                                </div>
+
                                 <div className="flex justify-center items-center space-x-2">
                                     <p className="font-mono text-xs text-gray-600 dark:text-gray-300 truncate select-all cursor-pointer" onClick={handleCopy}>
                                         {shortenAddress(account)}
@@ -793,14 +872,14 @@ export default function App() {
                                         >📱</span>
                                     </Tooltip>
                                 </div>
-                                
+
                                 <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">{formatToken(balance)}</p>
-                                
+
                                 <div className="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 text-xs">
                                     <p className="text-blue-700 dark:text-blue-300 font-medium">Exchange Rate</p>
                                     <p className="text-blue-600 dark:text-blue-400">1 BTC = 100,000,000 SATSTD</p>
                                 </div>
-                                
+
                                 <p className="text-sm text-gray-700 dark:text-gray-200">
                                     BTC Proof of Reserve: <span className="font-mono">{formatBtcReserve(poReserve)}</span>
                                 </p>
@@ -834,18 +913,32 @@ export default function App() {
                                     </div>
                                 </div>
                             )}
+
+                            {/* Figyelmeztető üzenet ha a szerződés szüneteltetett */}
+                            {isPaused && (
+                                <div className="p-3 rounded bg-red-100 dark:bg-red-700 text-red-700 dark:text-red-100 text-sm font-semibold text-center">
+                                    ⚠️ The contract is currently paused. All mint and burn operations are suspended.
+                                </div>
+                            )}
+
+                            {/* Pause és Unpause gombok */}
                             {(isPauser || isAdmin || isOperator) && (
-                                <button
-                                    onClick={handlePause}
-                                    disabled={loading}
-                                    className={`w-full py-2 my-1 rounded font-bold text-xs ${
-                                        isPaused
-                                        ? "bg-orange-600 dark:bg-orange-900 text-white"
-                                        : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white"
-                                    }`}
-                                >
-                                    {loading ? "Processing..." : isPaused ? "Unpause Contract" : "Pause Contract"}
-                                </button>
+                                <div className="flex space-x-2">
+                                    <button
+                                        onClick={handlePause}
+                                        disabled={loading || isPaused}
+                                        className="flex-1 py-2 rounded font-bold text-xs bg-red-600 dark:bg-red-800 text-white disabled:opacity-50"
+                                    >
+                                        {loading ? "Processing..." : "Pause Contract"}
+                                    </button>
+                                    <button
+                                        onClick={handleUnpause}
+                                        disabled={loading || !isPaused}
+                                        className="flex-1 py-2 rounded font-bold text-xs bg-green-600 dark:bg-green-800 text-white disabled:opacity-50"
+                                    >
+                                        {loading ? "Processing..." : "Unpause Contract"}
+                                    </button>
+                                </div>
                             )}
                             <div className="space-y-4">
                                 <MintController
@@ -871,10 +964,10 @@ export default function App() {
                     )}
                 </div>
             </div>
-            
+
             {/* Event Feed komponens */}
-            <EventFeed 
-                contract={contract} 
+            <EventFeed
+                contract={contract}
                 isVisible={isEventFeedVisible && !!contract}
                 maxEvents={15}
             />
